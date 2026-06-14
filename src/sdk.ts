@@ -76,6 +76,36 @@ export class RecursiveHarness {
     return this.httpClient.runStream(input);
   }
 
+  async chatStream(input: RunInput, onEvent: (event: StreamEvent) => void | Promise<void>): Promise<RunResult> {
+    let final: RunResult | undefined;
+    let output = "";
+    let traceId = "";
+    for await (const event of this.runStream(input)) {
+      traceId = event.traceId;
+      if (event.type === "token") {
+        output += String(event.data ?? "");
+      }
+      if (event.type === "done") {
+        const data = event.data as Partial<RunResult> | undefined;
+        final = {
+          traceId,
+          output: String(data?.output ?? output),
+          runtimeImageId: String(data?.runtimeImageId ?? ""),
+          toolCalls: data?.toolCalls ?? [],
+          reflection: String(data?.reflection ?? "")
+        };
+      }
+      if (event.type === "error") {
+        throw new Error(String(event.data ?? "Stream failed."));
+      }
+      await onEvent(event);
+    }
+    if (!final) {
+      throw new Error("Stream finished without a final response.");
+    }
+    return final;
+  }
+
   trackExperience(event: ExperienceEvent): Promise<ExperienceEvent> | ExperienceEvent {
     if (this.localRuntime) {
       return this.localRuntime.trackExperience(this.config, event);

@@ -60,9 +60,7 @@ export class RecursiveRuntime {
     const traceId = nanoid();
     const image = this.store.activeImage();
     const memory = createMemoryFromConfig(config);
-    const memoryContext = memory
-      ? await memory.read({ userId: input.userId, sessionId: input.sessionId, limit: config.memory?.maxMessagesPerSession })
-      : [];
+    const memoryContext = await this.readMemoryContext(config, input);
     const userMemory = {
       userId: input.userId,
       sessionId: input.sessionId,
@@ -131,9 +129,7 @@ export class RecursiveRuntime {
 
     try {
       const memory = createMemoryFromConfig(config);
-      const memoryContext = memory
-        ? await memory.read({ userId: input.userId, sessionId: input.sessionId, limit: config.memory?.maxMessagesPerSession })
-        : [];
+      const memoryContext = await this.readMemoryContext(config, input);
       const userMemory = {
         userId: input.userId,
         sessionId: input.sessionId,
@@ -377,6 +373,17 @@ export class RecursiveRuntime {
 
   private missingModelError(): never {
     throw new Error("Ollama is not configured. Set OLLAMA_API_KEY before calling chat(), run(), or runStream().");
+  }
+
+  private async readMemoryContext(config: HarnessConfig, input: RunInput): Promise<ConversationMessage[]> {
+    const limit = config.memory?.maxMessagesPerSession ?? 40;
+    const fileMemory = createMemoryFromConfig(config);
+    if (fileMemory) {
+      return fileMemory.read({ userId: input.userId, sessionId: input.sessionId, limit });
+    }
+    return this.store.memories
+      .filter((message) => message.userId === input.userId && message.sessionId === input.sessionId)
+      .slice(-limit);
   }
 
   private privateCapabilities(config: HarnessConfig): string[] {

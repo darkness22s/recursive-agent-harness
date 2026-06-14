@@ -162,6 +162,92 @@ describe("RecursiveHarness SDK", () => {
     }
   });
 
+  it("keeps conversational memory by default without requiring file memory config", async () => {
+    const ollamaKey = process.env.OLLAMA_API_KEY;
+    process.env.OLLAMA_API_KEY = "test-ollama-key";
+    const fetchMock = vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ message: { content: "I'll remember that your name is Sam." } }), {
+          status: 200,
+          headers: { "content-type": "application/json" }
+        })
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ message: { content: "Your name is Sam." } }), {
+          status: 200,
+          headers: { "content-type": "application/json" }
+        })
+      );
+    const harness = RecursiveHarness.create(config);
+
+    await harness.chat({
+      userId: "user_1",
+      sessionId: "chat_memory",
+      input: "My name is Sam."
+    });
+    await harness.chat({
+      userId: "user_1",
+      sessionId: "chat_memory",
+      input: "What is my name?"
+    });
+
+    const secondBody = JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body)) as { messages: Array<{ role: string; content: string }> };
+    const secondUserPayload = JSON.parse(secondBody.messages.find((message) => message.role === "user")?.content ?? "{}") as {
+      memory: Array<{ role: string; content: string }>;
+    };
+    expect(secondUserPayload.memory).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ role: "user", content: "My name is Sam." }),
+        expect.objectContaining({ role: "assistant", content: "I'll remember that your name is Sam." })
+      ])
+    );
+
+    if (ollamaKey) {
+      process.env.OLLAMA_API_KEY = ollamaKey;
+    } else {
+      delete process.env.OLLAMA_API_KEY;
+    }
+  });
+
+  it("supports callback-based streaming through chatStream", async () => {
+    const ollamaKey = process.env.OLLAMA_API_KEY;
+    process.env.OLLAMA_API_KEY = "test-ollama-key";
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(
+        new ReadableStream({
+          start(controller) {
+            const encoder = new TextEncoder();
+            controller.enqueue(encoder.encode(`${JSON.stringify({ message: { content: "stream" } })}\n`));
+            controller.enqueue(encoder.encode(`${JSON.stringify({ message: { content: " works" }, done: true })}\n`));
+            controller.close();
+          }
+        }),
+        { status: 200 }
+      )
+    );
+    const harness = RecursiveHarness.create(config);
+    const seen: string[] = [];
+
+    const result = await harness.chatStream({
+      userId: "user_1",
+      sessionId: "stream_chat",
+      input: "stream this"
+    }, (event) => {
+      if (event.type === "token") {
+        seen.push(String(event.data));
+      }
+    });
+
+    expect(seen.join("")).toBe("stream works");
+    expect(result.output).toBe("stream works");
+
+    if (ollamaKey) {
+      process.env.OLLAMA_API_KEY = ollamaKey;
+    } else {
+      delete process.env.OLLAMA_API_KEY;
+    }
+  });
+
   it("does not route current-data requests through TinyFish unless search is enabled", async () => {
     const tinyfishKey = process.env.TINYFISH_API_KEY;
     const ollamaKey = process.env.OLLAMA_API_KEY;

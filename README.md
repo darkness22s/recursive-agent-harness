@@ -107,7 +107,9 @@ harness.trackExperience({
 
 The SDK is designed for normal user chat. End-user responses should not mention the harness, VPS workers, runtime images, internal tools, API keys, telemetry, or deployment details. Those are operator concerns for your product/backend.
 
-Configure file-backed memory when creating the harness:
+Conversation memory works by default for the lifetime of the SDK/runtime instance. Reuse the same `RecursiveHarness` instance for the user's chat session and keep the same `userId` plus `sessionId`.
+
+Configure file-backed memory only when you want memory to survive app restarts:
 
 ```ts
 const harness = RecursiveHarness.create({
@@ -134,20 +136,32 @@ const result = await harness.chat({
 });
 ```
 
-Use `runStream()` when your UI wants token-by-token output:
+Use `chatStream()` when your UI wants token-by-token output with a simple callback:
+
+```ts
+const final = await harness.chatStream({
+  userId: "user_1",
+  sessionId: "session_1",
+  input: "What's the latest status?"
+}, (event) => {
+  if (event.type === "token") {
+    appendToChatBubble(String(event.data));
+  }
+  if (event.type === "tool_call") {
+    console.log("tool", event.data);
+  }
+});
+```
+
+You can also use `runStream()` directly as an async generator:
 
 ```ts
 for await (const event of harness.runStream({
   userId: "user_1",
   sessionId: "session_1",
-  input: "What's the latest status?"
+  input: "Stream this answer."
 })) {
-  if (event.type === "token") {
-    process.stdout.write(String(event.data));
-  }
-  if (event.type === "tool_call") {
-    console.log("tool", event.data);
-  }
+  if (event.type === "token") process.stdout.write(String(event.data));
 }
 ```
 
