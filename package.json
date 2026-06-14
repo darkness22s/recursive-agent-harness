@@ -1,0 +1,55 @@
+{
+  "name": "@darkness22s/recursive-harness-engine",
+  "version": "0.1.0",
+  "description": "Framework-style TypeScript SDK and autonomous recursive agent harness runtime.",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "files": [
+    "dist",
+    "examples",
+    "scripts",
+    "README.md",
+    ".env.example",
+    "wrangler.jsonc"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "vitest run",
+    "prepare": "npm run build",
+    "dev:runtime": "tsx src/cli/runtime-server.ts",
+    "dev:sample": "tsx examples/sample-app.ts",
+    "dev:local-worker": "tsx src/cli/local-worker.ts",
+    "smoke:local": "tsx scripts/smoke-local.ts",
+    "deploy:cloudflare": "npx wrangler deploy"
+  },
+  "keywords": [
+    "agents",
+    "sdk",
+    "recursive",
+    "harness",
+    "runtime"
+  ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/darkness22s/recursive-agent-harness.git"
+  },
+  "publishConfig": {
+    "registry": "https://npm.pkg.github.com",
+    "access": "public"
+  },
+  "dependencies": {
+    "@hono/node-server": "^1.19.6",
+    "hono": "^4.10.7",
+    "nanoid": "^5.1.6",
+    "zod": "^4.1.13"
+  },
+  "devDependencies": {
+    "@types/node": "^24.10.1",
+    "@cloudflare/workers-types": "^4.20260613.0",
+    "tsx": "^4.21.0",
+    "typescript": "^5.9.3",
+    "vitest": "^4.0.15"
+  }
+}

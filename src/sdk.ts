@@ -1,0 +1,91 @@
+import type { z } from "zod";
+import { detectAnger, detectProfanity } from "./detectors.js";
+import { RuntimeHttpClient } from "./http-client.js";
+import { RecursiveRuntime } from "./runtime.js";
+import type { AppSnapshot, ExperienceEvent, HarnessConfig, RunInput, RunResult, ToolDefinition, ToolManifest } from "./types.js";
+
+function schemaToManifest(schema: z.ZodType): unknown {
+  return {
+    kind: "zod",
+    description: schema.description ?? "Runtime-provided schema"
+  };
+}
+
+export class RecursiveHarness {
+  private readonly localRuntime?: RecursiveRuntime;
+  private readonly httpClient?: RuntimeHttpClient;
+
+  private constructor(private readonly config: HarnessConfig) {
+    if (config.runtimeUrl === "local") {
+      this.localRuntime = new RecursiveRuntime();
+    } else {
+      this.httpClient = new RuntimeHttpClient(config);
+    }
+  }
+
+  static create(config: HarnessConfig): RecursiveHarness {
+    return new RecursiveHarness(config);
+  }
+
+  registerTool<TInput, TOutput>(tool: ToolDefinition<TInput, TOutput>): void | Promise<{ ok: true }> {
+    const manifest: ToolManifest = {
+      name: tool.name,
+      description: tool.description,
+      schema: schemaToManifest(tool.inputSchema)
+    };
+
+    if (this.localRuntime) {
+      this.localRuntime.registerTool(tool, manifest);
+      return;
+    }
+    return this.httpClient?.registerToolManifest(manifest);
+  }
+
+  run(input: RunInput): Promise<RunResult> {
+    if (this.localRuntime) {
+      return this.localRuntime.run(this.config, input);
+    }
+    if (!this.httpClient) {
+      throw new Error("No runtime client is configured.");
+    }
+    return this.httpClient.run(input);
+  }
+
+  trackExperience(event: ExperienceEvent): Promise<ExperienceEvent> | ExperienceEvent {
+    if (this.localRuntime) {
+      return this.localRuntime.trackExperience(this.config, event);
+    }
+    return this.httpClient?.trackExperience(event) as Promise<ExperienceEvent>;
+  }
+
+  snapshot(snapshot: AppSnapshot): Promise<AppSnapshot> | AppSnapshot {
+    if (this.localRuntime) {
+      return this.localRuntime.snapshot(snapshot);
+    }
+    return this.httpClient?.snapshot(snapshot) as Promise<AppSnapshot>;
+  }
+
+  getActiveSuccessor() {
+    return this.localRuntime?.store.activeImage() ?? this.httpClient?.getActiveSuccessor();
+  }
+
+  getPromotionHistory() {
+    return this.localRuntime?.store.promotions ?? this.httpClient?.getPromotionHistory();
+  }
+
+  tickRecursion() {
+    return this.localRuntime?.tick() ?? this.httpClient?.tickRecursion();
+  }
+
+  rollbackIfNeeded(recentScore: number) {
+    return this.localRuntime?.rollbackIfNeeded(recentScore) ?? this.httpClient?.rollbackIfNeeded(recentScore);
+  }
+
+  detectProfanity(text: string): boolean {
+    return detectProfanity(text);
+  }
+
+  detectAnger(text: string): boolean {
+    return detectAnger(text);
+  }
+}

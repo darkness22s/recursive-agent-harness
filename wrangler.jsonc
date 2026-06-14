@@ -1,0 +1,25 @@
+{
+  "name": "recursive-agent-harness",
+  "main": "src/cloudflare-worker.ts",
+  "workers_dev": true,
+  "preview_urls": false,
+  "compatibility_date": "2026-06-13",
+  "compatibility_flags": ["nodejs_compat"],
+  "observability": {
+    "enabled": true,
+    "head_sampling_rate": 1
+  },
+  "triggers": {
+    "crons": ["0 */5 * * *"]
+  },
+  "kv_namespaces": [
+    {
+      "binding": "HARNESS_STATE",
+      "id": "2a3d7b178f6a4438be48450eca4bdba1"
+    }
+  ],
+  "vars": {
+    "RECURSIVE_HARNESS_MODEL": "gemma4:31b",
+    "OLLAMA_HOST": "https://ollama.com"
+  }
+}
