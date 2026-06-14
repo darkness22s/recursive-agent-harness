@@ -3,6 +3,8 @@ import type {
   ActivityRecord,
   AgentSummary,
   AppSnapshot,
+  AppUpdatePackage,
+  ConversationMessage,
   ExperienceEvent,
   LocalTask,
   LocalWorkerRecord,
@@ -24,6 +26,8 @@ export class InMemoryHarnessStore {
   readonly summaries: AgentSummary[] = [];
   readonly localWorkers = new Map<string, LocalWorkerRecord>();
   readonly localTasks: LocalTask[] = [];
+  readonly memories: ConversationMessage[] = [];
+  readonly updates: AppUpdatePackage[] = [];
 
   constructor() {
     this.images.push({
@@ -89,6 +93,26 @@ export class InMemoryHarnessStore {
       createdAt: snapshot.createdAt ?? new Date().toISOString()
     };
     this.snapshots.push(saved);
+    return saved;
+  }
+
+  addMemory(message: ConversationMessage): ConversationMessage {
+    const saved = {
+      ...message,
+      id: message.id ?? nanoid(),
+      createdAt: message.createdAt ?? new Date().toISOString()
+    };
+    this.memories.push(saved);
+    return saved;
+  }
+
+  addUpdate(update: AppUpdatePackage): AppUpdatePackage {
+    const saved = {
+      ...update,
+      id: update.id ?? nanoid(),
+      createdAt: update.createdAt ?? new Date().toISOString()
+    };
+    this.updates.push(saved);
     return saved;
   }
 

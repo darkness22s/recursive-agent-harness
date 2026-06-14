@@ -1,3 +1,6 @@
+import { mkdir, rm } from "node:fs/promises";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import {
@@ -111,6 +114,83 @@ describe("RecursiveHarness SDK", () => {
     if (ollamaKey) {
       process.env.OLLAMA_API_KEY = ollamaKey;
     }
+  });
+
+  it("streams conversational responses and writes file-backed memory", async () => {
+    const memoryDir = join(tmpdir(), `recursive-harness-memory-${Date.now()}`);
+    await mkdir(memoryDir, { recursive: true });
+    const ollamaKey = process.env.OLLAMA_API_KEY;
+    process.env.OLLAMA_API_KEY = "test-ollama-key";
+
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(
+        new ReadableStream({
+          start(controller) {
+            const encoder = new TextEncoder();
+            controller.enqueue(encoder.encode(`${JSON.stringify({ message: { content: "Hello" } })}\n`));
+            controller.enqueue(encoder.encode(`${JSON.stringify({ message: { content: " there" }, done: true })}\n`));
+            controller.close();
+          }
+        }),
+        { status: 200 }
+      )
+    );
+
+    const harness = RecursiveHarness.create({
+      ...config,
+      memory: { kind: "file", directory: memoryDir, maxMessagesPerSession: 10 }
+    });
+
+    const events = [];
+    for await (const event of harness.runStream({
+      userId: "user_1",
+      sessionId: "chat_1",
+      input: "remember that I like concise answers"
+    })) {
+      events.push(event);
+    }
+
+    expect(events.map((event) => event.type)).toContain("token");
+    expect(events.at(-1)?.type).toBe("done");
+
+    const exported = await harness.exportTrainingData();
+    expect(exported?.count).toBe(1);
+    expect(exported?.content).toContain("remember that I like concise answers");
+
+    if (ollamaKey) {
+      process.env.OLLAMA_API_KEY = ollamaKey;
+    } else {
+      delete process.env.OLLAMA_API_KEY;
+    }
+    await rm(memoryDir, { recursive: true, force: true });
+  });
+
+  it("delivers configured app updates through a webhook", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify({ ok: true }), { status: 200 }));
+    const harness = RecursiveHarness.create({
+      ...config,
+      updates: {
+        webhookUrl: "https://example.com/harness-updates",
+        apiKey: "update-secret",
+        channel: "beta"
+      }
+    });
+
+    const update = await harness.sendUpdate({
+      title: "Enable compact chat",
+      description: "Host app can switch to compact chat controls without reinstall.",
+      kind: "ui_config",
+      payload: { compactChat: true }
+    });
+
+    expect(update?.channel).toBe("beta");
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://example.com/harness-updates",
+      expect.objectContaining({
+        method: "POST",
+        headers: expect.objectContaining({ authorization: "Bearer update-secret" })
+      })
+    );
   });
 });
 

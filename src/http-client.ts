@@ -1,11 +1,14 @@
 import type {
   AppSnapshot,
+  AppUpdatePackage,
   ExperienceEvent,
   HarnessConfig,
   PromotionRecord,
   RunInput,
   RunResult,
   RuntimeImage,
+  StreamEvent,
+  TrainingExportOptions,
   ToolManifest
 } from "./types.js";
 
@@ -53,6 +56,40 @@ export class RuntimeHttpClient {
     });
   }
 
+  async *runStream(input: RunInput): AsyncGenerator<StreamEvent> {
+    const response = await fetch(`${this.config.runtimeUrl}/v1/run/stream`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        authorization: `Bearer ${this.config.apiKey}`
+      },
+      body: JSON.stringify({
+        config: this.config,
+        input
+      })
+    });
+    if (!response.ok || !response.body) {
+      throw new Error(`Runtime stream failed: ${response.status} ${await response.text()}`);
+    }
+
+    const decoder = new TextDecoder();
+    let buffer = "";
+    for await (const chunk of response.body as unknown as AsyncIterable<Uint8Array>) {
+      buffer += decoder.decode(chunk, { stream: true });
+      const events = buffer.split("\n\n");
+      buffer = events.pop() ?? "";
+      for (const event of events) {
+        const data = event
+          .split(/\r?\n/)
+          .find((line) => line.startsWith("data: "))
+          ?.slice("data: ".length);
+        if (data) {
+          yield JSON.parse(data) as StreamEvent;
+        }
+      }
+    }
+  }
+
   trackExperience(event: ExperienceEvent): Promise<ExperienceEvent> {
     return postJson(this.config.runtimeUrl, "/v1/events", this.config.apiKey, {
       config: this.config,
@@ -80,5 +117,16 @@ export class RuntimeHttpClient {
 
   rollbackIfNeeded(recentScore: number): Promise<PromotionRecord | undefined> {
     return postJson(this.config.runtimeUrl, "/v1/recursion/rollback-check", this.config.apiKey, { recentScore });
+  }
+
+  sendUpdate(update: AppUpdatePackage): Promise<AppUpdatePackage> {
+    return postJson(this.config.runtimeUrl, "/v1/updates", this.config.apiKey, {
+      config: this.config,
+      update
+    });
+  }
+
+  exportTrainingData(options?: TrainingExportOptions): Promise<{ format: "jsonl"; count: number; content: string; path?: string }> {
+    return postJson(this.config.runtimeUrl, "/v1/training/export", this.config.apiKey, { options });
   }
 }

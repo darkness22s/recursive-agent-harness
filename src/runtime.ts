@@ -1,12 +1,16 @@
 import { nanoid } from "nanoid";
 import type {
   AppSnapshot,
+  AppUpdatePackage,
+  ConversationMessage,
   EvaluationReport,
   ExperienceEvent,
   HarnessConfig,
   PromotionRecord,
   RunInput,
   RunResult,
+  StreamEvent,
+  TrainingExportOptions,
   ToolCallResult,
   ToolDefinition,
   ToolManifest
@@ -17,8 +21,11 @@ import { reflectionNarrative, summarizeExperience } from "./reflection.js";
 import { buildSuccessorImage } from "./successor.js";
 import { evaluateSuccessor } from "./evaluator.js";
 import { applyPromotion, rollbackIfDegraded } from "./promotion.js";
-import { generateOllamaAnswer } from "./ollama.js";
+import { generateOllamaAnswer, streamOllamaAnswer } from "./ollama.js";
 import { needsFreshSearch, searchTinyFish, type TinyFishSearchResult } from "./tinyfish.js";
+import { createMemoryFromConfig } from "./memory.js";
+import { deliverAppUpdate } from "./updates.js";
+import { exportTrainingData } from "./training-export.js";
 
 export interface RuntimeTickResult {
   candidateId: string;
@@ -52,6 +59,19 @@ export class RecursiveRuntime {
   async run(config: HarnessConfig, input: RunInput): Promise<RunResult> {
     const traceId = nanoid();
     const image = this.store.activeImage();
+    const memory = createMemoryFromConfig(config);
+    const memoryContext = memory
+      ? await memory.read({ userId: input.userId, sessionId: input.sessionId, limit: config.memory?.maxMessagesPerSession })
+      : [];
+    const userMemory = {
+      userId: input.userId,
+      sessionId: input.sessionId,
+      role: "user",
+      content: input.input,
+      metadata: { context: input.context }
+    } satisfies ConversationMessage;
+    await memory?.append(userMemory);
+    this.store.addMemory(userMemory);
     const toolCalls = [
       ...(await this.maybeSearch(config, input, traceId)),
       ...(await this.maybeCallTools(config, input, traceId))
@@ -69,10 +89,20 @@ export class RecursiveRuntime {
       run: input,
       toolCalls,
       searchResults,
+      memory: memoryContext,
       reflection,
       recoveryStrategy: image.behaviorPolicy.recoveryStrategy
     });
     const output = `${repairPrefix}${modelOutput ?? this.composeAnswer(input, toolCalls, image.behaviorPolicy.recoveryStrategy)}`;
+    const assistantInput = {
+      userId: input.userId,
+      sessionId: input.sessionId,
+      role: "assistant",
+      content: output,
+      metadata: { traceId, runtimeImageId: image.id, toolCalls }
+    } satisfies ConversationMessage;
+    const assistantMemory = await memory?.append(assistantInput);
+    const storedAssistantMemory = this.store.addMemory(assistantMemory ?? assistantInput);
     this.store.addActivity({
       kind: "run",
       title: "Harness run",
@@ -85,8 +115,79 @@ export class RecursiveRuntime {
       output,
       runtimeImageId: image.id,
       toolCalls,
-      reflection
+      reflection,
+      memory: [...memoryContext, storedAssistantMemory]
     };
+  }
+
+  async *runStream(config: HarnessConfig, input: RunInput): AsyncGenerator<StreamEvent> {
+    const traceId = nanoid();
+    const image = this.store.activeImage();
+    yield { type: "start", traceId, data: { runtimeImageId: image.id } };
+
+    try {
+      const memory = createMemoryFromConfig(config);
+      const memoryContext = memory
+        ? await memory.read({ userId: input.userId, sessionId: input.sessionId, limit: config.memory?.maxMessagesPerSession })
+        : [];
+      const userMemory = {
+        userId: input.userId,
+        sessionId: input.sessionId,
+        role: "user",
+        content: input.input,
+        metadata: { context: input.context }
+      } satisfies ConversationMessage;
+      await memory?.append(userMemory);
+      this.store.addMemory(userMemory);
+
+      const toolCalls = [
+        ...(await this.maybeSearch(config, input, traceId)),
+        ...(await this.maybeCallTools(config, input, traceId))
+      ];
+      for (const call of toolCalls) {
+        yield { type: "tool_call", traceId, data: call };
+      }
+
+      const findings = summarizeExperience(this.store.events);
+      const reflection = reflectionNarrative(findings);
+      const searchResults = this.extractSearchResults(toolCalls);
+      let output = "";
+      for await (const token of streamOllamaAnswer({
+        run: input,
+        toolCalls,
+        searchResults,
+        memory: memoryContext,
+        reflection,
+        recoveryStrategy: image.behaviorPolicy.recoveryStrategy
+      })) {
+        output += token;
+        yield { type: "token", traceId, data: token };
+      }
+
+      if (!output) {
+        output = this.composeAnswer(input, toolCalls, image.behaviorPolicy.recoveryStrategy);
+        yield { type: "token", traceId, data: output };
+      }
+
+      const assistantMemory = {
+        userId: input.userId,
+        sessionId: input.sessionId,
+        role: "assistant",
+        content: output,
+        metadata: { traceId, runtimeImageId: image.id, toolCalls }
+      } satisfies ConversationMessage;
+      const savedAssistant = await memory?.append(assistantMemory);
+      this.store.addMemory(savedAssistant ?? assistantMemory);
+      this.store.addActivity({
+        kind: "run",
+        title: "Harness stream run",
+        detail: input.input,
+        metadata: { userId: input.userId, sessionId: input.sessionId, runtimeImageId: image.id, toolCalls }
+      });
+      yield { type: "done", traceId, data: { output, runtimeImageId: image.id, toolCalls, reflection } };
+    } catch (error) {
+      yield { type: "error", traceId, data: error instanceof Error ? error.message : String(error) };
+    }
   }
 
   trackExperience(config: HarnessConfig, event: ExperienceEvent): ExperienceEvent {
@@ -104,6 +205,44 @@ export class RecursiveRuntime {
 
   snapshot(snapshot: AppSnapshot): AppSnapshot {
     return this.store.addSnapshot(snapshot);
+  }
+
+  remember(message: ConversationMessage): ConversationMessage {
+    const saved = this.store.addMemory(message);
+    this.store.addActivity({
+      kind: "memory",
+      title: "Conversation memory saved",
+      detail: `${saved.role}: ${saved.content}`,
+      metadata: { userId: saved.userId, sessionId: saved.sessionId }
+    });
+    return saved;
+  }
+
+  async deliverUpdate(config: HarnessConfig, update: AppUpdatePackage): Promise<AppUpdatePackage> {
+    const delivered = await deliverAppUpdate(config, update);
+    this.store.addUpdate(delivered);
+    this.store.addActivity({
+      kind: "update",
+      title: "App update delivered",
+      detail: delivered.title,
+      metadata: { updateId: delivered.id, kind: delivered.kind, channel: delivered.channel }
+    });
+    return delivered;
+  }
+
+  async exportTrainingData(options?: TrainingExportOptions) {
+    const result = await exportTrainingData({
+      conversations: this.store.memories,
+      experienceEvents: this.store.events,
+      options
+    });
+    this.store.addActivity({
+      kind: "training_export",
+      title: "Training data exported",
+      detail: `${result.count} training record(s) exported`,
+      metadata: { path: result.path, format: result.format }
+    });
+    return result;
   }
 
   tick(): RuntimeTickResult {

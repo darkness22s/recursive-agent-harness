@@ -2,7 +2,18 @@ import type { z } from "zod";
 import { detectAnger, detectProfanity } from "./detectors.js";
 import { RuntimeHttpClient } from "./http-client.js";
 import { RecursiveRuntime } from "./runtime.js";
-import type { AppSnapshot, ExperienceEvent, HarnessConfig, RunInput, RunResult, ToolDefinition, ToolManifest } from "./types.js";
+import type {
+  AppSnapshot,
+  AppUpdatePackage,
+  ExperienceEvent,
+  HarnessConfig,
+  RunInput,
+  RunResult,
+  StreamEvent,
+  ToolDefinition,
+  ToolManifest,
+  TrainingExportOptions
+} from "./types.js";
 
 function schemaToManifest(schema: z.ZodType): unknown {
   return {
@@ -51,6 +62,20 @@ export class RecursiveHarness {
     return this.httpClient.run(input);
   }
 
+  chat(input: RunInput): Promise<RunResult> {
+    return this.run(input);
+  }
+
+  runStream(input: RunInput): AsyncGenerator<StreamEvent> {
+    if (this.localRuntime) {
+      return this.localRuntime.runStream(this.config, input);
+    }
+    if (!this.httpClient) {
+      throw new Error("No runtime client is configured.");
+    }
+    return this.httpClient.runStream(input);
+  }
+
   trackExperience(event: ExperienceEvent): Promise<ExperienceEvent> | ExperienceEvent {
     if (this.localRuntime) {
       return this.localRuntime.trackExperience(this.config, event);
@@ -79,6 +104,20 @@ export class RecursiveHarness {
 
   rollbackIfNeeded(recentScore: number) {
     return this.localRuntime?.rollbackIfNeeded(recentScore) ?? this.httpClient?.rollbackIfNeeded(recentScore);
+  }
+
+  sendUpdate(update: AppUpdatePackage) {
+    if (this.localRuntime) {
+      return this.localRuntime.deliverUpdate(this.config, update);
+    }
+    return this.httpClient?.sendUpdate(update);
+  }
+
+  exportTrainingData(options?: TrainingExportOptions) {
+    if (this.localRuntime) {
+      return this.localRuntime.exportTrainingData(options);
+    }
+    return this.httpClient?.exportTrainingData(options);
   }
 
   detectProfanity(text: string): boolean {

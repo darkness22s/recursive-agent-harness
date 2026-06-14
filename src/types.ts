@@ -10,6 +10,16 @@ export interface HarnessConfig {
   apiKey: string;
   optimization: OptimizationTarget;
   autonomy: AutonomyMode;
+  memory?: {
+    kind: "file";
+    directory: string;
+    maxMessagesPerSession?: number;
+  };
+  updates?: {
+    webhookUrl?: string;
+    apiKey?: string;
+    channel?: string;
+  };
 }
 
 export interface ToolContext {
@@ -45,6 +55,13 @@ export interface RunResult {
   runtimeImageId: string;
   toolCalls: ToolCallResult[];
   reflection: string;
+  memory?: ConversationMessage[];
+}
+
+export interface StreamEvent {
+  type: "start" | "tool_call" | "token" | "done" | "error";
+  traceId: string;
+  data?: unknown;
 }
 
 export interface ToolCallResult {
@@ -53,6 +70,35 @@ export interface ToolCallResult {
   input: unknown;
   output?: unknown;
   error?: string;
+}
+
+export interface ConversationMessage {
+  id?: string;
+  userId: string;
+  sessionId: string;
+  role: "user" | "assistant" | "tool" | "system";
+  content: string;
+  createdAt?: string;
+  metadata?: Record<string, unknown>;
+}
+
+export interface AppUpdatePackage {
+  id?: string;
+  appId?: string;
+  channel?: string;
+  version?: string;
+  title: string;
+  description: string;
+  kind: "instruction" | "tool_manifest" | "ui_config" | "runtime_policy" | "bundle_url";
+  payload: Record<string, unknown>;
+  createdAt?: string;
+}
+
+export interface TrainingExportOptions {
+  format?: "jsonl";
+  path?: string;
+  includeToolCalls?: boolean;
+  includeExperience?: boolean;
 }
 
 export interface ExperienceSignals {
@@ -148,6 +194,9 @@ export type ActivityKind =
   | "promotion"
   | "rollback"
   | "search"
+  | "memory"
+  | "update"
+  | "training_export"
   | "local_worker"
   | "local_task";
 

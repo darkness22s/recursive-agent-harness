@@ -97,6 +97,95 @@ harness.trackExperience({
 });
 ```
 
+## Conversational Streaming And Memory
+
+Configure file-backed memory when creating the harness:
+
+```ts
+const harness = RecursiveHarness.create({
+  appId: "my-product",
+  runtimeUrl: "local",
+  apiKey: "dev",
+  optimization: "retention",
+  autonomy: "full",
+  memory: {
+    kind: "file",
+    directory: "./harness-memory",
+    maxMessagesPerSession: 40
+  }
+});
+```
+
+Use `chat()` for normal conversational turns:
+
+```ts
+const result = await harness.chat({
+  userId: "user_1",
+  sessionId: "session_1",
+  input: "Remember that I like concise answers."
+});
+```
+
+Use `runStream()` when your UI wants token-by-token output:
+
+```ts
+for await (const event of harness.runStream({
+  userId: "user_1",
+  sessionId: "session_1",
+  input: "What's the latest status?"
+})) {
+  if (event.type === "token") {
+    process.stdout.write(String(event.data));
+  }
+  if (event.type === "tool_call") {
+    console.log("tool", event.data);
+  }
+}
+```
+
+The stream emits public events only: `start`, `tool_call`, `token`, `done`, and `error`.
+
+## App Updates Without Redownloading
+
+The VPS/local worker is for upgrading and operating the harness, not for every end user. Your app can opt into runtime-delivered updates by exposing a webhook and adding update config:
+
+```ts
+const harness = RecursiveHarness.create({
+  appId: "my-product",
+  runtimeUrl: "local",
+  apiKey: "dev",
+  optimization: "retention",
+  autonomy: "full",
+  updates: {
+    webhookUrl: "https://my-product.com/api/harness-updates",
+    apiKey: "host-update-secret",
+    channel: "production"
+  }
+});
+
+await harness.sendUpdate({
+  title: "Enable compact chat",
+  description: "Switch chat controls to the compact layout.",
+  kind: "ui_config",
+  payload: { compactChat: true }
+});
+```
+
+Your host app decides how to apply the update. The SDK sends structured update packages; it does not force arbitrary code into user devices.
+
+## Training Data Export
+
+Export conversation pairs and outcomes as JSONL for later model training or fine-tuning pipelines:
+
+```ts
+const exportResult = await harness.exportTrainingData({
+  path: "./exports/training.jsonl",
+  includeExperience: true
+});
+
+console.log(exportResult.count);
+```
+
 ## Runtime Server
 
 ```bash

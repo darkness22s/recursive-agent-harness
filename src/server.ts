@@ -33,6 +33,25 @@ export function createRuntimeServer(runtime = new RecursiveRuntime()): Hono {
     return context.json(result);
   });
 
+  app.post("/v1/run/stream", async (context) => {
+    const body = (await context.req.json()) as { config: HarnessConfig; input: Parameters<RecursiveRuntime["run"]>[1] };
+    const stream = new ReadableStream({
+      async start(controller) {
+        const encoder = new TextEncoder();
+        for await (const event of runtime.runStream(body.config, body.input)) {
+          controller.enqueue(encoder.encode(`data: ${JSON.stringify(event)}\n\n`));
+        }
+        controller.close();
+      }
+    });
+    return new Response(stream, {
+      headers: {
+        "content-type": "text/event-stream",
+        "cache-control": "no-cache"
+      }
+    });
+  });
+
   app.post("/v1/events", async (context) => {
     const body = (await context.req.json()) as { config: HarnessConfig; event: Parameters<RecursiveRuntime["trackExperience"]>[1] };
     return context.json(runtime.trackExperience(body.config, body.event));
@@ -41,6 +60,16 @@ export function createRuntimeServer(runtime = new RecursiveRuntime()): Hono {
   app.post("/v1/snapshots", async (context) => {
     const body = (await context.req.json()) as { snapshot: Parameters<RecursiveRuntime["snapshot"]>[0] };
     return context.json(runtime.snapshot(body.snapshot));
+  });
+
+  app.post("/v1/updates", async (context) => {
+    const body = (await context.req.json()) as { config: HarnessConfig; update: Parameters<RecursiveRuntime["deliverUpdate"]>[1] };
+    return context.json(await runtime.deliverUpdate(body.config, body.update));
+  });
+
+  app.post("/v1/training/export", async (context) => {
+    const body = (await context.req.json()) as { options?: Parameters<RecursiveRuntime["exportTrainingData"]>[0] };
+    return context.json(await runtime.exportTrainingData(body.options));
   });
 
   app.post("/v1/recursion/tick", (context) => context.json(runtime.tick()));
