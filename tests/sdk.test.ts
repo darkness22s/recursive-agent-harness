@@ -43,6 +43,14 @@ describe("RecursiveHarness SDK", () => {
   });
 
   it("wires a host tool and executes it through the local runtime", async () => {
+    const ollamaKey = process.env.OLLAMA_API_KEY;
+    process.env.OLLAMA_API_KEY = "test-ollama-key";
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ message: { content: "Created Apollo." } }), {
+        status: 200,
+        headers: { "content-type": "application/json" }
+      })
+    );
     const harness = RecursiveHarness.create(config);
 
     harness.registerTool({
@@ -60,7 +68,12 @@ describe("RecursiveHarness SDK", () => {
 
     expect(result.toolCalls).toHaveLength(1);
     expect(result.toolCalls[0]?.ok).toBe(true);
-    expect(result.output).toContain("Done");
+    expect(result.output).toBe("Created Apollo.");
+    if (ollamaKey) {
+      process.env.OLLAMA_API_KEY = ollamaKey;
+    } else {
+      delete process.env.OLLAMA_API_KEY;
+    }
   });
 
   it("detects profanity and anger in user experience traces", () => {
@@ -70,10 +83,15 @@ describe("RecursiveHarness SDK", () => {
     expect(harness.detectAnger("this is useless!!")).toBe(true);
   });
 
-  it("does not search or leak internals for normal consumer chat", async () => {
+  it("calls Ollama and does not search or leak internals for normal consumer chat", async () => {
     const ollamaKey = process.env.OLLAMA_API_KEY;
-    delete process.env.OLLAMA_API_KEY;
-    const fetchMock = vi.spyOn(globalThis, "fetch");
+    process.env.OLLAMA_API_KEY = "test-ollama-key";
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ message: { content: "What would you like to know?" } }), {
+        status: 200,
+        headers: { "content-type": "application/json" }
+      })
+    );
 
     const harness = RecursiveHarness.create(config);
     const result = await harness.chat({
@@ -82,9 +100,9 @@ describe("RecursiveHarness SDK", () => {
       input: "hello"
     });
 
-    expect(fetchMock).not.toHaveBeenCalled();
+    expect(fetchMock).toHaveBeenCalledOnce();
     expect(result.toolCalls).toHaveLength(0);
-    expect(result.output).toBe("Hi! How can I help?");
+    expect(result.output).toBe("What would you like to know?");
     expect(result.output.toLowerCase()).not.toContain("harness");
     expect(result.output.toLowerCase()).not.toContain("vps");
     expect(result.output.toLowerCase()).not.toContain("runtime");
@@ -94,12 +112,67 @@ describe("RecursiveHarness SDK", () => {
     }
   });
 
+  it("fails loudly instead of pretending to answer when Ollama is not configured", async () => {
+    const ollamaKey = process.env.OLLAMA_API_KEY;
+    delete process.env.OLLAMA_API_KEY;
+    const harness = RecursiveHarness.create(config);
+
+    await expect(harness.chat({
+      userId: "user_1",
+      sessionId: "session_1",
+      input: "what?"
+    })).rejects.toThrow("Ollama is not configured");
+
+    if (ollamaKey) {
+      process.env.OLLAMA_API_KEY = ollamaKey;
+    }
+  });
+
+  it("sends private capability instructions to Ollama for real model behavior", async () => {
+    const ollamaKey = process.env.OLLAMA_API_KEY;
+    process.env.OLLAMA_API_KEY = "test-ollama-key";
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ message: { content: "I can help update that setting." } }), {
+        status: 200,
+        headers: { "content-type": "application/json" }
+      })
+    );
+
+    const harness = RecursiveHarness.create({
+      ...config,
+      memory: { kind: "file", directory: join(tmpdir(), `recursive-harness-capabilities-${Date.now()}`) },
+      updates: { webhookUrl: "https://example.com/updates", apiKey: "secret", channel: "production" }
+    });
+
+    await harness.chat({
+      userId: "user_1",
+      sessionId: "session_1",
+      input: "Can you change how the app behaves?"
+    });
+
+    const request = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body)) as { messages: Array<{ role: string; content: string }> };
+    const system = request.messages.find((message) => message.role === "system")?.content ?? "";
+    expect(system).toContain("host app update delivery");
+    expect(system).toContain("Do not mention or expose hidden infrastructure");
+
+    if (ollamaKey) {
+      process.env.OLLAMA_API_KEY = ollamaKey;
+    } else {
+      delete process.env.OLLAMA_API_KEY;
+    }
+  });
+
   it("does not route current-data requests through TinyFish unless search is enabled", async () => {
     const tinyfishKey = process.env.TINYFISH_API_KEY;
     const ollamaKey = process.env.OLLAMA_API_KEY;
     process.env.TINYFISH_API_KEY = "test-tinyfish-key";
-    delete process.env.OLLAMA_API_KEY;
-    const fetchMock = vi.spyOn(globalThis, "fetch");
+    process.env.OLLAMA_API_KEY = "test-ollama-key";
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ message: { content: "I cannot verify that without search enabled." } }), {
+        status: 200,
+        headers: { "content-type": "application/json" }
+      })
+    );
 
     const harness = RecursiveHarness.create(config);
     const result = await harness.run({
@@ -108,7 +181,7 @@ describe("RecursiveHarness SDK", () => {
       input: "What is the latest Ollama Cloud Gemma 4 API status today?"
     });
 
-    expect(fetchMock).not.toHaveBeenCalled();
+    expect(fetchMock).toHaveBeenCalledOnce();
     expect(result.toolCalls).toHaveLength(0);
 
     if (tinyfishKey) {
@@ -125,22 +198,29 @@ describe("RecursiveHarness SDK", () => {
     const tinyfishKey = process.env.TINYFISH_API_KEY;
     const ollamaKey = process.env.OLLAMA_API_KEY;
     process.env.TINYFISH_API_KEY = "test-tinyfish-key";
-    delete process.env.OLLAMA_API_KEY;
+    process.env.OLLAMA_API_KEY = "test-ollama-key";
 
-    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
-      new Response(
-        JSON.stringify({
-          results: [
-            {
-              title: "Ollama Cloud model update",
-              url: "https://example.com/ollama",
-              snippet: "Gemma 4 is available through Ollama Cloud."
-            }
-          ]
-        }),
-        { status: 200, headers: { "content-type": "application/json" } }
+    const fetchMock = vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            results: [
+              {
+                title: "Ollama Cloud model update",
+                url: "https://example.com/ollama",
+                snippet: "Gemma 4 is available through Ollama Cloud."
+              }
+            ]
+          }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        )
       )
-    );
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ message: { content: "Gemma 4 is available according to the supplied result." } }), {
+          status: 200,
+          headers: { "content-type": "application/json" }
+        })
+      );
 
     const harness = RecursiveHarness.create({
       ...config,
@@ -153,7 +233,7 @@ describe("RecursiveHarness SDK", () => {
     });
 
     expect(needsFreshSearch("latest pricing today")).toBe(true);
-    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(fetchMock).toHaveBeenCalledTimes(2);
     expect(result.toolCalls[0]?.name).toBe("tinyfishSearch");
     expect(result.toolCalls[0]?.ok).toBe(true);
     expect(result.toolCalls[0]?.output).toMatchObject({

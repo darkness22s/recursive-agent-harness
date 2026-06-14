@@ -10,6 +10,9 @@ export interface HarnessConfig {
   apiKey: string;
   optimization: OptimizationTarget;
   autonomy: AutonomyMode;
+  model?: {
+    provider?: "ollama";
+  };
   memory?: {
     kind: "file";
     directory: string;

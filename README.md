@@ -47,7 +47,7 @@ $env:OLLAMA_API_KEY="your_ollama_cloud_api_key"
 $env:RECURSIVE_HARNESS_MODEL="gemma4:31b"
 ```
 
-When `OLLAMA_API_KEY` is present, the runtime calls Ollama Cloud for user-facing harness responses. Without the key, it falls back to deterministic local responses so tests and development still run.
+`OLLAMA_API_KEY` is required for user-facing chat. Without it, `chat()`, `run()`, and `runStream()` fail with a configuration error instead of pretending to answer.
 
 ## TinyFish Search Tool
 
@@ -69,6 +69,7 @@ const harness = RecursiveHarness.create({
   apiKey: "dev",
   optimization: "retention",
   autonomy: "full",
+  model: { provider: "ollama" },
   search: {
     enabled: true,
     provider: "tinyfish",

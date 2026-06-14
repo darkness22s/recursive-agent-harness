@@ -21,7 +21,7 @@ import { reflectionNarrative, summarizeExperience } from "./reflection.js";
 import { buildSuccessorImage } from "./successor.js";
 import { evaluateSuccessor } from "./evaluator.js";
 import { applyPromotion, rollbackIfDegraded } from "./promotion.js";
-import { generateOllamaAnswer, streamOllamaAnswer } from "./ollama.js";
+import { generateOllamaAnswer, isOllamaConfigured, streamOllamaAnswer } from "./ollama.js";
 import { needsFreshSearch, searchTinyFish, type TinyFishSearchResult } from "./tinyfish.js";
 import { createMemoryFromConfig } from "./memory.js";
 import { deliverAppUpdate } from "./updates.js";
@@ -85,15 +85,19 @@ export class RecursiveRuntime {
         ? "I hear the frustration. "
         : "";
 
-    const modelOutput = await generateOllamaAnswer({
-      run: input,
-      toolCalls,
-      searchResults,
-      memory: memoryContext,
-      reflection,
-      recoveryStrategy: image.behaviorPolicy.recoveryStrategy
-    });
-    const output = `${repairPrefix}${modelOutput ?? this.composeAnswer(input, toolCalls, image.behaviorPolicy.recoveryStrategy)}`;
+    const modelOutput = isOllamaConfigured()
+      ? await generateOllamaAnswer({
+          run: input,
+          toolCalls,
+          searchResults,
+          memory: memoryContext,
+          reflection,
+          recoveryStrategy: image.behaviorPolicy.recoveryStrategy,
+          capabilities: this.privateCapabilities(config),
+          updateDeliveryConfigured: Boolean(config.updates?.webhookUrl)
+        })
+      : this.missingModelError();
+    const output = `${repairPrefix}${modelOutput}`;
     const assistantInput = {
       userId: input.userId,
       sessionId: input.sessionId,
@@ -152,21 +156,26 @@ export class RecursiveRuntime {
       const reflection = reflectionNarrative(findings);
       const searchResults = this.extractSearchResults(toolCalls);
       let output = "";
-      for await (const token of streamOllamaAnswer({
-        run: input,
-        toolCalls,
-        searchResults,
-        memory: memoryContext,
-        reflection,
-        recoveryStrategy: image.behaviorPolicy.recoveryStrategy
-      })) {
-        output += token;
-        yield { type: "token", traceId, data: token };
+      if (isOllamaConfigured()) {
+        for await (const token of streamOllamaAnswer({
+          run: input,
+          toolCalls,
+          searchResults,
+          memory: memoryContext,
+          reflection,
+          recoveryStrategy: image.behaviorPolicy.recoveryStrategy,
+          capabilities: this.privateCapabilities(config),
+          updateDeliveryConfigured: Boolean(config.updates?.webhookUrl)
+        })) {
+          output += token;
+          yield { type: "token", traceId, data: token };
+        }
+      } else {
+        throw this.missingModelError();
       }
 
       if (!output) {
-        output = this.composeAnswer(input, toolCalls, image.behaviorPolicy.recoveryStrategy);
-        yield { type: "token", traceId, data: output };
+        throw new Error("Ollama returned an empty response.");
       }
 
       const assistantMemory = {
@@ -366,17 +375,20 @@ export class RecursiveRuntime {
     };
   }
 
-  private composeAnswer(input: RunInput, toolCalls: ToolCallResult[], recoveryStrategy: string): string {
-    if (toolCalls.length > 0) {
-      const call = toolCalls[0];
-      return call.ok
-        ? `Done. I used ${call.name} and kept the session moving.`
-        : `I tried ${call.name}, but it failed: ${call.error}. ${recoveryStrategy}.`;
-    }
-    const text = input.input.trim().toLowerCase();
-    if (/^(hi|hello|hey|yo|sup)[.!?\s]*$/.test(text)) {
-      return "Hi! How can I help?";
-    }
-    return "I can help with that. Tell me what you want to do next.";
+  private missingModelError(): never {
+    throw new Error("Ollama is not configured. Set OLLAMA_API_KEY before calling chat(), run(), or runStream().");
+  }
+
+  private privateCapabilities(config: HarnessConfig): string[] {
+    return [
+      "normal conversation",
+      config.memory ? "file-backed memory" : undefined,
+      config.search?.enabled ? "current-data search" : undefined,
+      this.tools.size > 0 ? "host-registered tools" : undefined,
+      config.updates?.webhookUrl ? "host app update delivery" : undefined,
+      "experience tracking",
+      "successor evaluation",
+      "training data export"
+    ].filter(Boolean) as string[];
   }
 }
