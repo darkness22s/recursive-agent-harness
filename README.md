@@ -51,13 +51,13 @@ When `OLLAMA_API_KEY` is present, the runtime calls Ollama Cloud for user-facing
 
 ## TinyFish Search Tool
 
-Set `TINYFISH_API_KEY` to let the runtime call TinyFish when the user asks for current, latest, recent, pricing, docs, source-backed, or other up-to-date information:
+Search is **off by default** for consumer chat. Set `TINYFISH_API_KEY` and opt in with `search.enabled` only when your product wants current-data lookup:
 
 ```powershell
 $env:TINYFISH_API_KEY="your_tinyfish_api_key"
 ```
 
-When triggered, search appears in `result.toolCalls` as `tinyfishSearch`. Your product can stream or display that public tool event without exposing hidden reasoning.
+When enabled and triggered by a current-data request, search appears in `result.toolCalls` as `tinyfishSearch`. A normal message like `"hello"` does not call TinyFish.
 
 ```ts
 import { RecursiveHarness } from "@darkness22s/recursive-harness-engine";
@@ -68,7 +68,12 @@ const harness = RecursiveHarness.create({
   runtimeUrl: "local",
   apiKey: "dev",
   optimization: "retention",
-  autonomy: "full"
+  autonomy: "full",
+  search: {
+    enabled: true,
+    provider: "tinyfish",
+    mode: "freshness"
+  }
 });
 
 harness.registerTool({
@@ -98,6 +103,8 @@ harness.trackExperience({
 ```
 
 ## Conversational Streaming And Memory
+
+The SDK is designed for normal user chat. End-user responses should not mention the harness, VPS workers, runtime images, internal tools, API keys, telemetry, or deployment details. Those are operator concerns for your product/backend.
 
 Configure file-backed memory when creating the harness:
 

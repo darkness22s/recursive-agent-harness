@@ -123,7 +123,7 @@ export class RecursiveRuntime {
   async *runStream(config: HarnessConfig, input: RunInput): AsyncGenerator<StreamEvent> {
     const traceId = nanoid();
     const image = this.store.activeImage();
-    yield { type: "start", traceId, data: { runtimeImageId: image.id } };
+    yield { type: "start", traceId };
 
     try {
       const memory = createMemoryFromConfig(config);
@@ -184,7 +184,7 @@ export class RecursiveRuntime {
         detail: input.input,
         metadata: { userId: input.userId, sessionId: input.sessionId, runtimeImageId: image.id, toolCalls }
       });
-      yield { type: "done", traceId, data: { output, runtimeImageId: image.id, toolCalls, reflection } };
+      yield { type: "done", traceId, data: { output, toolCalls } };
     } catch (error) {
       yield { type: "error", traceId, data: error instanceof Error ? error.message : String(error) };
     }
@@ -310,7 +310,7 @@ export class RecursiveRuntime {
   }
 
   private async maybeSearch(config: HarnessConfig, input: RunInput, traceId: string): Promise<ToolCallResult[]> {
-    if (!needsFreshSearch(input.input)) {
+    if (!config.search?.enabled || !needsFreshSearch(input.input)) {
       return [];
     }
 
@@ -373,6 +373,10 @@ export class RecursiveRuntime {
         ? `Done. I used ${call.name} and kept the session moving.`
         : `I tried ${call.name}, but it failed: ${call.error}. ${recoveryStrategy}.`;
     }
-    return `I am using the active recursive harness to respond and preserve continuity for session ${input.sessionId}.`;
+    const text = input.input.trim().toLowerCase();
+    if (/^(hi|hello|hey|yo|sup)[.!?\s]*$/.test(text)) {
+      return "Hi! How can I help?";
+    }
+    return "I can help with that. Tell me what you want to do next.";
   }
 }

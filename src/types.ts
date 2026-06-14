@@ -15,6 +15,11 @@ export interface HarnessConfig {
     directory: string;
     maxMessagesPerSession?: number;
   };
+  search?: {
+    enabled: boolean;
+    provider?: "tinyfish";
+    mode?: "freshness";
+  };
   updates?: {
     webhookUrl?: string;
     apiKey?: string;

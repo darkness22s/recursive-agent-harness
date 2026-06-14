@@ -70,7 +70,58 @@ describe("RecursiveHarness SDK", () => {
     expect(harness.detectAnger("this is useless!!")).toBe(true);
   });
 
-  it("routes current-data requests through the built-in TinyFish search tool", async () => {
+  it("does not search or leak internals for normal consumer chat", async () => {
+    const ollamaKey = process.env.OLLAMA_API_KEY;
+    delete process.env.OLLAMA_API_KEY;
+    const fetchMock = vi.spyOn(globalThis, "fetch");
+
+    const harness = RecursiveHarness.create(config);
+    const result = await harness.chat({
+      userId: "user_1",
+      sessionId: "session_1",
+      input: "hello"
+    });
+
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(result.toolCalls).toHaveLength(0);
+    expect(result.output).toBe("Hi! How can I help?");
+    expect(result.output.toLowerCase()).not.toContain("harness");
+    expect(result.output.toLowerCase()).not.toContain("vps");
+    expect(result.output.toLowerCase()).not.toContain("runtime");
+
+    if (ollamaKey) {
+      process.env.OLLAMA_API_KEY = ollamaKey;
+    }
+  });
+
+  it("does not route current-data requests through TinyFish unless search is enabled", async () => {
+    const tinyfishKey = process.env.TINYFISH_API_KEY;
+    const ollamaKey = process.env.OLLAMA_API_KEY;
+    process.env.TINYFISH_API_KEY = "test-tinyfish-key";
+    delete process.env.OLLAMA_API_KEY;
+    const fetchMock = vi.spyOn(globalThis, "fetch");
+
+    const harness = RecursiveHarness.create(config);
+    const result = await harness.run({
+      userId: "user_1",
+      sessionId: "session_1",
+      input: "What is the latest Ollama Cloud Gemma 4 API status today?"
+    });
+
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(result.toolCalls).toHaveLength(0);
+
+    if (tinyfishKey) {
+      process.env.TINYFISH_API_KEY = tinyfishKey;
+    } else {
+      delete process.env.TINYFISH_API_KEY;
+    }
+    if (ollamaKey) {
+      process.env.OLLAMA_API_KEY = ollamaKey;
+    }
+  });
+
+  it("routes current-data requests through TinyFish when search is enabled", async () => {
     const tinyfishKey = process.env.TINYFISH_API_KEY;
     const ollamaKey = process.env.OLLAMA_API_KEY;
     process.env.TINYFISH_API_KEY = "test-tinyfish-key";
@@ -91,7 +142,10 @@ describe("RecursiveHarness SDK", () => {
       )
     );
 
-    const harness = RecursiveHarness.create(config);
+    const harness = RecursiveHarness.create({
+      ...config,
+      search: { enabled: true, provider: "tinyfish", mode: "freshness" }
+    });
     const result = await harness.run({
       userId: "user_1",
       sessionId: "session_1",
@@ -152,6 +206,7 @@ describe("RecursiveHarness SDK", () => {
 
     expect(events.map((event) => event.type)).toContain("token");
     expect(events.at(-1)?.type).toBe("done");
+    expect(JSON.stringify(events)).not.toContain("runtimeImageId");
 
     const exported = await harness.exportTrainingData();
     expect(exported?.count).toBe(1);
