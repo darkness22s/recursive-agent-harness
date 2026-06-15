@@ -324,9 +324,17 @@ export class RecursiveRuntime {
 
   private async runAgentLoop(config: HarnessConfig, input: RunInput, traceId: string, memoryContext: ConversationMessage[]): Promise<ToolCallResult[]> {
     const toolCalls: ToolCallResult[] = [];
-    for (let step = 0; step < 3; step += 1) {
+    for (let step = 0; step < this.maxSteps(config); step += 1) {
       const action = await this.planNextAction(config, input, memoryContext, toolCalls);
       if (action.action === "answer") {
+        break;
+      }
+      if (toolCalls.length >= this.maxToolCalls(config)) {
+        toolCalls.push({ name: "agentLoop", ok: false, input: this.publicAction(action), error: "Agent loop tool-call limit reached." });
+        break;
+      }
+      if (this.isRepeatedAction(toolCalls, action)) {
+        toolCalls.push({ name: "agentLoop", ok: false, input: this.publicAction(action), error: "Agent loop stopped a repeated action." });
         break;
       }
       const call = await this.executeAgentAction(config, input, traceId, action);
@@ -340,10 +348,22 @@ export class RecursiveRuntime {
 
   private async *streamAgentLoop(config: HarnessConfig, input: RunInput, traceId: string, memoryContext: ConversationMessage[]): AsyncGenerator<StreamEvent> {
     const toolCalls: ToolCallResult[] = [];
-    for (let step = 0; step < 3; step += 1) {
+    for (let step = 0; step < this.maxSteps(config); step += 1) {
       const action = await this.planNextAction(config, input, memoryContext, toolCalls);
       yield { type: "agent_action", traceId, data: this.publicAction(action) };
       if (action.action === "answer") {
+        break;
+      }
+      if (toolCalls.length >= this.maxToolCalls(config)) {
+        const call = { name: "agentLoop", ok: false, input: this.publicAction(action), error: "Agent loop tool-call limit reached." };
+        toolCalls.push(call);
+        yield { type: "tool_call", traceId, data: call };
+        break;
+      }
+      if (this.isRepeatedAction(toolCalls, action)) {
+        const call = { name: "agentLoop", ok: false, input: this.publicAction(action), error: "Agent loop stopped a repeated action." };
+        toolCalls.push(call);
+        yield { type: "tool_call", traceId, data: call };
         break;
       }
       const call = await this.executeAgentAction(config, input, traceId, action);
@@ -356,10 +376,11 @@ export class RecursiveRuntime {
   }
 
   private async planNextAction(config: HarnessConfig, input: RunInput, memoryContext: ConversationMessage[], toolCalls: ToolCallResult[]): Promise<AgentLoopAction> {
-    if (toolCalls.length > 0) {
-      return { action: "answer" };
-    }
-    const heuristicSearch = config.search?.enabled && toolCalls.length === 0 && needsFreshSearch(input.input);
+    const heuristicSearch =
+      (config.agentLoop?.forceSearchOnFreshness ?? true) &&
+      config.search?.enabled &&
+      toolCalls.length === 0 &&
+      needsFreshSearch(input.input);
     if (heuristicSearch) {
       return { action: "search", query: input.input, reason: "current-data request" };
     }
@@ -391,6 +412,14 @@ export class RecursiveRuntime {
     const candidateInput = action.input ?? {};
     if (!selected) {
       return { name: action.toolName, ok: false, input: candidateInput, error: "Requested tool is not registered." };
+    }
+    if (selected.requiresApproval || selected.risk === "high") {
+      return {
+        name: selected.name,
+        ok: false,
+        input: candidateInput,
+        error: "Tool requires host approval before execution."
+      };
     }
 
     try {
@@ -472,6 +501,24 @@ export class RecursiveRuntime {
     return { action: "answer" };
   }
 
+  private maxSteps(config: HarnessConfig): number {
+    return clampInteger(config.agentLoop?.maxSteps ?? 6, 1, 12);
+  }
+
+  private maxToolCalls(config: HarnessConfig): number {
+    return clampInteger(config.agentLoop?.maxToolCalls ?? 4, 0, 10);
+  }
+
+  private isRepeatedAction(toolCalls: ToolCallResult[], action: AgentLoopAction): boolean {
+    if (action.action === "answer") {
+      return false;
+    }
+    const name = action.action === "search" ? "tinyfishSearch" : action.toolName;
+    const input = action.action === "search" ? { query: action.query } : action.input ?? {};
+    const serialized = stableStringify(input);
+    return toolCalls.some((call) => call.name === name && stableStringify(call.input) === serialized);
+  }
+
   private async readMemoryContext(config: HarnessConfig, input: RunInput): Promise<ConversationMessage[]> {
     const limit = config.memory?.maxMessagesPerSession ?? 40;
     const fileMemory = createMemoryFromConfig(config);
@@ -499,4 +546,22 @@ export class RecursiveRuntime {
 
 function escapeSingleQuotedJson(value: unknown): string {
   return JSON.stringify(value).replace(/'/g, "'\\''");
+}
+
+function clampInteger(value: number, min: number, max: number): number {
+  if (!Number.isFinite(value)) {
+    return min;
+  }
+  return Math.min(max, Math.max(min, Math.trunc(value)));
+}
+
+function stableStringify(value: unknown): string {
+  if (value === null || typeof value !== "object") {
+    return JSON.stringify(value);
+  }
+  if (Array.isArray(value)) {
+    return `[${value.map((item) => stableStringify(item)).join(",")}]`;
+  }
+  const record = value as Record<string, unknown>;
+  return `{${Object.keys(record).sort().map((key) => `${JSON.stringify(key)}:${stableStringify(record[key])}`).join(",")}}`;
 }

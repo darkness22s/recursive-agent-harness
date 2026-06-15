@@ -53,6 +53,12 @@ describe("RecursiveHarness SDK", () => {
         })
       )
       .mockResolvedValueOnce(
+        new Response(JSON.stringify({ message: { content: JSON.stringify({ action: "answer" }) } }), {
+          status: 200,
+          headers: { "content-type": "application/json" }
+        })
+      )
+      .mockResolvedValueOnce(
         new Response(JSON.stringify({ message: { content: "Created Apollo." } }), {
           status: 200,
           headers: { "content-type": "application/json" }
@@ -76,6 +82,168 @@ describe("RecursiveHarness SDK", () => {
     expect(result.toolCalls).toHaveLength(1);
     expect(result.toolCalls[0]?.ok).toBe(true);
     expect(result.output).toBe("Created Apollo.");
+    if (ollamaKey) {
+      process.env.OLLAMA_API_KEY = ollamaKey;
+    } else {
+      delete process.env.OLLAMA_API_KEY;
+    }
+  });
+
+  it("continues the agent loop after a search observation to call a matching host tool", async () => {
+    const tinyfishKey = process.env.TINYFISH_API_KEY;
+    const ollamaKey = process.env.OLLAMA_API_KEY;
+    process.env.TINYFISH_API_KEY = "test-tinyfish-key";
+    process.env.OLLAMA_API_KEY = "test-ollama-key";
+    const fetchMock = vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ results: [{ title: "Current release", url: "https://example.com/release", snippet: "Fresh data" }] }), {
+          status: 200,
+          headers: { "content-type": "application/json" }
+        })
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ message: { content: JSON.stringify({ action: "tool", toolName: "saveResearch", input: { title: "Current release" } }) } }), {
+          status: 200,
+          headers: { "content-type": "application/json" }
+        })
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ message: { content: JSON.stringify({ action: "answer" }) } }), {
+          status: 200,
+          headers: { "content-type": "application/json" }
+        })
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ message: { content: "Saved the latest release note." } }), {
+          status: 200,
+          headers: { "content-type": "application/json" }
+        })
+      );
+    const harness = RecursiveHarness.create({
+      ...config,
+      search: { enabled: true, provider: "tinyfish", mode: "freshness" },
+      agentLoop: { maxSteps: 4, maxToolCalls: 3 }
+    });
+
+    harness.registerTool({
+      name: "saveResearch",
+      description: "Stores a public research note",
+      inputSchema: z.object({ title: z.string() }),
+      execute: (input) => ({ saved: true, title: input.title })
+    });
+
+    const result = await harness.run({
+      userId: "user_1",
+      sessionId: "loop_multi_step",
+      input: "Search for the latest release and save it"
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(4);
+    expect(result.toolCalls.map((call) => call.name)).toEqual(["tinyfishSearch", "saveResearch"]);
+    expect(result.toolCalls.every((call) => call.ok)).toBe(true);
+    expect(result.output).toBe("Saved the latest release note.");
+
+    if (tinyfishKey) {
+      process.env.TINYFISH_API_KEY = tinyfishKey;
+    } else {
+      delete process.env.TINYFISH_API_KEY;
+    }
+    if (ollamaKey) {
+      process.env.OLLAMA_API_KEY = ollamaKey;
+    } else {
+      delete process.env.OLLAMA_API_KEY;
+    }
+  });
+
+  it("stops repeated tool actions before they loop", async () => {
+    const ollamaKey = process.env.OLLAMA_API_KEY;
+    process.env.OLLAMA_API_KEY = "test-ollama-key";
+    vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ message: { content: JSON.stringify({ action: "tool", toolName: "createProject", input: { name: "Apollo" } }) } }), {
+          status: 200,
+          headers: { "content-type": "application/json" }
+        })
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ message: { content: JSON.stringify({ action: "tool", toolName: "createProject", input: { name: "Apollo" } }) } }), {
+          status: 200,
+          headers: { "content-type": "application/json" }
+        })
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ message: { content: "I stopped after creating the project once." } }), {
+          status: 200,
+          headers: { "content-type": "application/json" }
+        })
+      );
+    const harness = RecursiveHarness.create({
+      ...config,
+      agentLoop: { maxSteps: 4, maxToolCalls: 3 }
+    });
+
+    harness.registerTool({
+      name: "createProject",
+      description: "Creates a project",
+      inputSchema: z.object({ name: z.string() }),
+      execute: (input) => ({ id: "project_1", name: input.name })
+    });
+
+    const result = await harness.run({
+      userId: "user_1",
+      sessionId: "repeat_guard",
+      input: "createProject Apollo"
+    });
+
+    expect(result.toolCalls).toHaveLength(2);
+    expect(result.toolCalls[0]).toMatchObject({ name: "createProject", ok: true });
+    expect(result.toolCalls[1]).toMatchObject({ name: "agentLoop", ok: false, error: "Agent loop stopped a repeated action." });
+
+    if (ollamaKey) {
+      process.env.OLLAMA_API_KEY = ollamaKey;
+    } else {
+      delete process.env.OLLAMA_API_KEY;
+    }
+  });
+
+  it("blocks high-risk tools until the host provides approval handling", async () => {
+    const ollamaKey = process.env.OLLAMA_API_KEY;
+    process.env.OLLAMA_API_KEY = "test-ollama-key";
+    vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ message: { content: JSON.stringify({ action: "tool", toolName: "deleteAccount", input: { id: "user_1" } }) } }), {
+          status: 200,
+          headers: { "content-type": "application/json" }
+        })
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ message: { content: "I cannot complete that without approval." } }), {
+          status: 200,
+          headers: { "content-type": "application/json" }
+        })
+      );
+    const harness = RecursiveHarness.create(config);
+
+    harness.registerTool({
+      name: "deleteAccount",
+      description: "Deletes an account",
+      risk: "high",
+      inputSchema: z.object({ id: z.string() }),
+      execute: () => ({ deleted: true })
+    });
+
+    const result = await harness.run({
+      userId: "user_1",
+      sessionId: "approval_guard",
+      input: "delete my account"
+    });
+
+    expect(result.toolCalls[0]).toMatchObject({
+      name: "deleteAccount",
+      ok: false,
+      error: "Tool requires host approval before execution."
+    });
+
     if (ollamaKey) {
       process.env.OLLAMA_API_KEY = ollamaKey;
     } else {
@@ -309,6 +477,12 @@ describe("RecursiveHarness SDK", () => {
         )
       )
       .mockResolvedValueOnce(
+        new Response(JSON.stringify({ message: { content: JSON.stringify({ action: "answer" }) } }), {
+          status: 200,
+          headers: { "content-type": "application/json" }
+        })
+      )
+      .mockResolvedValueOnce(
         new Response(JSON.stringify({ message: { content: "Gemma 4 is available according to the supplied result." } }), {
           status: 200,
           headers: { "content-type": "application/json" }
@@ -326,7 +500,7 @@ describe("RecursiveHarness SDK", () => {
     });
 
     expect(needsFreshSearch("latest pricing today")).toBe(true);
-    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock).toHaveBeenCalledTimes(3);
     expect(result.toolCalls[0]?.name).toBe("tinyfishSearch");
     expect(result.toolCalls[0]?.ok).toBe(true);
     expect(result.toolCalls[0]?.output).toMatchObject({
@@ -363,6 +537,12 @@ describe("RecursiveHarness SDK", () => {
           }),
           { status: 200, headers: { "content-type": "application/json" } }
         )
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ message: { content: JSON.stringify({ action: "answer" }) } }), {
+          status: 200,
+          headers: { "content-type": "application/json" }
+        })
       )
       .mockResolvedValueOnce(
         new Response(JSON.stringify({ message: { content: "You're right, that earlier answer was outdated. Anthropic has a newer release." } }), {

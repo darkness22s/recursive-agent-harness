@@ -1,12 +1,13 @@
 {
   "name": "@darkness22s/recursive-harness-engine",
-  "version": "0.3.2",
+  "version": "0.3.3",
   "description": "Framework-style TypeScript SDK and autonomous recursive agent harness runtime.",
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "files": [
     "dist",
+    "docs",
     "examples",
     "scripts",
     "README.md",

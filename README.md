@@ -67,7 +67,40 @@ $env:TINYFISH_API_KEY="your_tinyfish_api_key"
 
 When enabled and triggered by a current-data request, search appears in `result.toolCalls` as `tinyfishSearch`. A normal message like `"hello"` does not call TinyFish.
 
-The chat runtime uses a bounded action loop. When search or host tools are available, the model first plans one public-safe action (`search`, `tool`, or `answer`), the runtime executes the action, then the model answers with the observation. Freshness/correction language such as `"latest"`, `"today"`, `"outdated"`, `"search for"`, or `"verify"` forces the TinyFish search tool before the final answer.
+The chat runtime uses a bounded action loop. When search or host tools are available, the model plans one public-safe action (`search`, `tool`, or `answer`), the runtime executes the action, feeds the observation back to the planner, and continues until the planner answers or loop limits stop it. Freshness/correction language such as `"latest"`, `"today"`, `"outdated"`, `"search for"`, or `"verify"` forces the TinyFish search tool before the planner continues.
+
+Tune the loop per app:
+
+```ts
+const harness = RecursiveHarness.create({
+  appId: "my-app",
+  runtimeUrl: "local",
+  apiKey: "dev",
+  optimization: "retention",
+  autonomy: "full",
+  search: { enabled: true, provider: "tinyfish", mode: "freshness" },
+  agentLoop: {
+    maxSteps: 6,
+    maxToolCalls: 4,
+    forceSearchOnFreshness: true
+  }
+});
+```
+
+Mark risky tools so the SDK blocks them until the host app adds an approval flow:
+
+```ts
+harness.registerTool({
+  name: "deleteAccount",
+  description: "Deletes an account",
+  risk: "high",
+  requiresApproval: true,
+  inputSchema,
+  execute
+});
+```
+
+See `docs/agent-loop-research.md` for the architecture research and the SDK contract behind this loop.
 
 ```ts
 import { RecursiveHarness } from "@darkness22s/recursive-harness-engine";

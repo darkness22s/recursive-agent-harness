@@ -23,6 +23,11 @@ export interface HarnessConfig {
     provider?: "tinyfish";
     mode?: "freshness";
   };
+  agentLoop?: {
+    maxSteps?: number;
+    maxToolCalls?: number;
+    forceSearchOnFreshness?: boolean;
+  };
   updates?: {
     webhookUrl?: string;
     apiKey?: string;
@@ -46,6 +51,8 @@ export interface ToolDefinition<TInput = unknown, TOutput = unknown> {
   name: string;
   description: string;
   inputSchema: z.ZodType<TInput>;
+  risk?: "low" | "medium" | "high";
+  requiresApproval?: boolean;
   execute(input: TInput, context: ToolContext): Promise<TOutput> | TOutput;
 }
 
