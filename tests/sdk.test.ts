@@ -21,6 +21,7 @@ const config = {
 
 afterEach(() => {
   vi.restoreAllMocks();
+  RecursiveHarness.resetLocalRuntimes();
 });
 
 describe("RecursiveHarness SDK", () => {
@@ -384,6 +385,56 @@ describe("RecursiveHarness SDK", () => {
     }
   });
 
+  it("keeps memory when the host recreates the local SDK between chat turns", async () => {
+    const ollamaKey = process.env.OLLAMA_API_KEY;
+    process.env.OLLAMA_API_KEY = "test-ollama-key";
+    const uniqueConfig = {
+      ...config,
+      appId: `memory-recreate-${Date.now()}`
+    };
+    const fetchMock = vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ message: { content: "I'll remember that you prefer short answers." } }), {
+          status: 200,
+          headers: { "content-type": "application/json" }
+        })
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ message: { content: "You prefer short answers." } }), {
+          status: 200,
+          headers: { "content-type": "application/json" }
+        })
+      );
+
+    await RecursiveHarness.create(uniqueConfig).chat({
+      userId: "user_1",
+      sessionId: "recreated_sdk_memory",
+      input: "Remember that I prefer short answers."
+    });
+    await RecursiveHarness.create(uniqueConfig).chat({
+      userId: "user_1",
+      sessionId: "recreated_sdk_memory",
+      input: "What do I prefer?"
+    });
+
+    const secondBody = JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body)) as { messages: Array<{ role: string; content: string }> };
+    const secondUserPayload = JSON.parse(secondBody.messages.find((message) => message.role === "user")?.content ?? "{}") as {
+      memory: Array<{ role: string; content: string }>;
+    };
+    expect(secondUserPayload.memory).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ role: "user", content: "Remember that I prefer short answers." }),
+        expect.objectContaining({ role: "assistant", content: "I'll remember that you prefer short answers." })
+      ])
+    );
+
+    if (ollamaKey) {
+      process.env.OLLAMA_API_KEY = ollamaKey;
+    } else {
+      delete process.env.OLLAMA_API_KEY;
+    }
+  });
+
   it("supports callback-based streaming through chatStream", async () => {
     const ollamaKey = process.env.OLLAMA_API_KEY;
     process.env.OLLAMA_API_KEY = "test-ollama-key";
@@ -452,6 +503,52 @@ describe("RecursiveHarness SDK", () => {
     }
     if (ollamaKey) {
       process.env.OLLAMA_API_KEY = ollamaKey;
+    }
+  });
+
+  it("does not force web search for urgent command text", async () => {
+    const tinyfishKey = process.env.TINYFISH_API_KEY;
+    const ollamaKey = process.env.OLLAMA_API_KEY;
+    process.env.TINYFISH_API_KEY = "test-tinyfish-key";
+    process.env.OLLAMA_API_KEY = "test-ollama-key";
+
+    const fetchMock = vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ message: { content: JSON.stringify({ action: "answer" }) } }), {
+          status: 200,
+          headers: { "content-type": "application/json" }
+        })
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ message: { content: "I can start on that." } }), {
+          status: 200,
+          headers: { "content-type": "application/json" }
+        })
+      );
+
+    const harness = RecursiveHarness.create({
+      ...config,
+      search: { enabled: true, provider: "tinyfish", mode: "freshness" }
+    });
+    const result = await harness.run({
+      userId: "user_1",
+      sessionId: "no_search_now",
+      input: "start doing it NOW"
+    });
+
+    expect(needsFreshSearch("start doing it NOW")).toBe(false);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(result.toolCalls).toHaveLength(0);
+
+    if (tinyfishKey) {
+      process.env.TINYFISH_API_KEY = tinyfishKey;
+    } else {
+      delete process.env.TINYFISH_API_KEY;
+    }
+    if (ollamaKey) {
+      process.env.OLLAMA_API_KEY = ollamaKey;
+    } else {
+      delete process.env.OLLAMA_API_KEY;
     }
   });
 

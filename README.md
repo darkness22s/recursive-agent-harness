@@ -65,9 +65,9 @@ Search is **off by default** for consumer chat. Set `TINYFISH_API_KEY` and opt i
 $env:TINYFISH_API_KEY="your_tinyfish_api_key"
 ```
 
-When enabled and triggered by a current-data request, search appears in `result.toolCalls` as `tinyfishSearch`. A normal message like `"hello"` does not call TinyFish.
+When enabled and triggered by a current-data request, search appears in `result.toolCalls` as `tinyfishSearch`. A normal message like `"hello"` or an urgent command like `"start doing it NOW"` does not call TinyFish.
 
-The chat runtime uses a bounded action loop. When search or host tools are available, the model plans one public-safe action (`search`, `tool`, or `answer`), the runtime executes the action, feeds the observation back to the planner, and continues until the planner answers or loop limits stop it. Freshness/correction language such as `"latest"`, `"today"`, `"outdated"`, `"search for"`, or `"verify"` forces the TinyFish search tool before the planner continues.
+The chat runtime uses a bounded action loop. When search or host tools are available, the model plans one public-safe action (`search`, `tool`, or `answer`), the runtime executes the action, feeds the observation back to the planner, and continues until the planner answers or loop limits stop it. Explicit freshness/correction language such as `"latest Anthropic model"`, `"pricing today"`, `"outdated"`, `"search for"`, or `"verify"` forces the TinyFish search tool before the planner continues. Generic urgency words do not force web search.
 
 Tune the loop per app:
 
@@ -151,6 +151,8 @@ harness.trackExperience({
 The SDK is designed for normal user chat. End-user responses should not mention the harness, VPS workers, runtime images, internal tools, API keys, telemetry, or deployment details. Those are operator concerns for your product/backend.
 
 Conversation memory works by default for the lifetime of the SDK/runtime instance. Reuse the same `RecursiveHarness` instance for the user's chat session and keep the same `userId` plus `sessionId`.
+
+For `runtimeUrl: "local"`, the SDK also shares a local runtime by `appId`, so normal app code that recreates `RecursiveHarness.create(...)` between turns still keeps session memory. Use the same `appId`, `userId`, and `sessionId` for a continuous conversation.
 
 Configure file-backed memory only when you want memory to survive app restarts:
 

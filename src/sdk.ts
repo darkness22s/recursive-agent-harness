@@ -28,7 +28,7 @@ export class RecursiveHarness {
 
   private constructor(private readonly config: HarnessConfig) {
     if (config.runtimeUrl === "local") {
-      this.localRuntime = new RecursiveRuntime();
+      this.localRuntime = getSharedLocalRuntime(config.appId);
     } else {
       this.httpClient = new RuntimeHttpClient(config);
     }
@@ -36,6 +36,10 @@ export class RecursiveHarness {
 
   static create(config: HarnessConfig): RecursiveHarness {
     return new RecursiveHarness(config);
+  }
+
+  static resetLocalRuntimes(): void {
+    sharedLocalRuntimes.clear();
   }
 
   registerTool<TInput, TOutput>(tool: ToolDefinition<TInput, TOutput>): void | Promise<{ ok: true }> {
@@ -164,4 +168,16 @@ export class RecursiveHarness {
   detectAnger(text: string): boolean {
     return detectAnger(text);
   }
+}
+
+const sharedLocalRuntimes = new Map<string, RecursiveRuntime>();
+
+function getSharedLocalRuntime(appId: string): RecursiveRuntime {
+  const existing = sharedLocalRuntimes.get(appId);
+  if (existing) {
+    return existing;
+  }
+  const runtime = new RecursiveRuntime();
+  sharedLocalRuntimes.set(appId, runtime);
+  return runtime;
 }
