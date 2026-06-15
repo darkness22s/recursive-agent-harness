@@ -45,12 +45,19 @@ describe("RecursiveHarness SDK", () => {
   it("wires a host tool and executes it through the local runtime", async () => {
     const ollamaKey = process.env.OLLAMA_API_KEY;
     process.env.OLLAMA_API_KEY = "test-ollama-key";
-    vi.spyOn(globalThis, "fetch").mockResolvedValue(
-      new Response(JSON.stringify({ message: { content: "Created Apollo." } }), {
-        status: 200,
-        headers: { "content-type": "application/json" }
-      })
-    );
+    vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ message: { content: JSON.stringify({ action: "tool", toolName: "createProject", input: { name: "Apollo" } }) } }), {
+          status: 200,
+          headers: { "content-type": "application/json" }
+        })
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ message: { content: "Created Apollo." } }), {
+          status: 200,
+          headers: { "content-type": "application/json" }
+        })
+      );
     const harness = RecursiveHarness.create(config);
 
     harness.registerTool({
@@ -325,6 +332,57 @@ describe("RecursiveHarness SDK", () => {
     expect(result.toolCalls[0]?.output).toMatchObject({
       query: "What is the latest Ollama Cloud Gemma 4 API status today?"
     });
+
+    if (tinyfishKey) {
+      process.env.TINYFISH_API_KEY = tinyfishKey;
+    } else {
+      delete process.env.TINYFISH_API_KEY;
+    }
+    if (ollamaKey) {
+      process.env.OLLAMA_API_KEY = ollamaKey;
+    }
+  });
+
+  it("searches when the user corrects an outdated answer", async () => {
+    const tinyfishKey = process.env.TINYFISH_API_KEY;
+    const ollamaKey = process.env.OLLAMA_API_KEY;
+    process.env.TINYFISH_API_KEY = "test-tinyfish-key";
+    process.env.OLLAMA_API_KEY = "test-ollama-key";
+
+    vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            results: [
+              {
+                title: "Anthropic model release",
+                url: "https://example.com/anthropic",
+                snippet: "Anthropic announced a newer model."
+              }
+            ]
+          }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        )
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ message: { content: "You're right, that earlier answer was outdated. Anthropic has a newer release." } }), {
+          status: 200,
+          headers: { "content-type": "application/json" }
+        })
+      );
+
+    const harness = RecursiveHarness.create({
+      ...config,
+      search: { enabled: true, provider: "tinyfish", mode: "freshness" }
+    });
+    const result = await harness.run({
+      userId: "user_1",
+      sessionId: "anthropic_latest",
+      input: "no that is outdated, search for the latest Anthropic model"
+    });
+
+    expect(result.toolCalls[0]?.name).toBe("tinyfishSearch");
+    expect(result.toolCalls[0]?.ok).toBe(true);
 
     if (tinyfishKey) {
       process.env.TINYFISH_API_KEY = tinyfishKey;

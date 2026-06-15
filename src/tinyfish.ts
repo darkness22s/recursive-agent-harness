@@ -38,7 +38,11 @@ const FRESHNESS_TERMS = [
   "source",
   "sources",
   "cite",
-  "citation"
+  "citation",
+  "outdated",
+  "search for",
+  "look up",
+  "verify"
 ];
 
 export function getTinyFishConfig(): TinyFishConfig {

@@ -49,6 +49,14 @@ $env:RECURSIVE_HARNESS_MODEL="gemma4:31b"
 
 `OLLAMA_API_KEY` is required for user-facing chat. Without it, `chat()`, `run()`, and `runStream()` fail with a configuration error instead of pretending to answer.
 
+For local development only, you can keep ignored credentials in `.env.development.local` and load them in PowerShell before running samples:
+
+```powershell
+Get-Content .env.development.local | ForEach-Object {
+  if ($_ -match "^(.*?)=(.*)$") { Set-Item -Path "env:$($matches[1])" -Value $matches[2] }
+}
+```
+
 ## TinyFish Search Tool
 
 Search is **off by default** for consumer chat. Set `TINYFISH_API_KEY` and opt in with `search.enabled` only when your product wants current-data lookup:
@@ -58,6 +66,8 @@ $env:TINYFISH_API_KEY="your_tinyfish_api_key"
 ```
 
 When enabled and triggered by a current-data request, search appears in `result.toolCalls` as `tinyfishSearch`. A normal message like `"hello"` does not call TinyFish.
+
+The chat runtime uses a bounded action loop. When search or host tools are available, the model first plans one public-safe action (`search`, `tool`, or `answer`), the runtime executes the action, then the model answers with the observation. Freshness/correction language such as `"latest"`, `"today"`, `"outdated"`, `"search for"`, or `"verify"` forces the TinyFish search tool before the final answer.
 
 ```ts
 import { RecursiveHarness } from "@darkness22s/recursive-harness-engine";

@@ -72,7 +72,7 @@ export interface RunResult {
 }
 
 export interface StreamEvent {
-  type: "start" | "tool_call" | "token" | "done" | "error";
+  type: "start" | "agent_action" | "tool_call" | "token" | "done" | "error";
   traceId: string;
   data?: unknown;
 }

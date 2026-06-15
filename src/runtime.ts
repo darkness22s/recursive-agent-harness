@@ -22,7 +22,7 @@ import { reflectionNarrative, summarizeExperience } from "./reflection.js";
 import { buildSuccessorImage } from "./successor.js";
 import { evaluateSuccessor } from "./evaluator.js";
 import { applyPromotion, rollbackIfDegraded } from "./promotion.js";
-import { generateOllamaAnswer, isOllamaConfigured, streamOllamaAnswer } from "./ollama.js";
+import { generateOllamaAnswer, isOllamaConfigured, planAgentAction, streamOllamaAnswer, type AgentLoopAction } from "./ollama.js";
 import { needsFreshSearch, searchTinyFish, type TinyFishSearchResult } from "./tinyfish.js";
 import { createMemoryFromConfig } from "./memory.js";
 import { deliverAppUpdate } from "./updates.js";
@@ -72,10 +72,7 @@ export class RecursiveRuntime {
     } satisfies ConversationMessage;
     await memory?.append(userMemory);
     this.store.addMemory(userMemory);
-    const toolCalls = [
-      ...(await this.maybeSearch(config, input, traceId)),
-      ...(await this.maybeCallTools(config, input, traceId))
-    ];
+    const toolCalls = await this.runAgentLoop(config, input, traceId, memoryContext);
     const searchResults = this.extractSearchResults(toolCalls);
     const findings = summarizeExperience(this.store.events);
     const reflection = reflectionNarrative(findings);
@@ -142,12 +139,12 @@ export class RecursiveRuntime {
       await memory?.append(userMemory);
       this.store.addMemory(userMemory);
 
-      const toolCalls = [
-        ...(await this.maybeSearch(config, input, traceId)),
-        ...(await this.maybeCallTools(config, input, traceId))
-      ];
-      for (const call of toolCalls) {
-        yield { type: "tool_call", traceId, data: call };
+      const toolCalls: ToolCallResult[] = [];
+      for await (const event of this.streamAgentLoop(config, input, traceId, memoryContext)) {
+        if (event.type === "tool_call") {
+          toolCalls.push(event.data as ToolCallResult);
+        }
+        yield event;
       }
 
       const findings = summarizeExperience(this.store.events);
@@ -325,18 +322,81 @@ export class RecursiveRuntime {
     });
   }
 
-  private async maybeCallTools(config: HarnessConfig, input: RunInput, traceId: string): Promise<ToolCallResult[]> {
-    const lower = input.input.toLowerCase();
-    const selected = [...this.tools.values()].find((tool) => lower.includes(tool.name.toLowerCase()));
+  private async runAgentLoop(config: HarnessConfig, input: RunInput, traceId: string, memoryContext: ConversationMessage[]): Promise<ToolCallResult[]> {
+    const toolCalls: ToolCallResult[] = [];
+    for (let step = 0; step < 3; step += 1) {
+      const action = await this.planNextAction(config, input, memoryContext, toolCalls);
+      if (action.action === "answer") {
+        break;
+      }
+      const call = await this.executeAgentAction(config, input, traceId, action);
+      toolCalls.push(call);
+      if (!call.ok) {
+        break;
+      }
+    }
+    return toolCalls;
+  }
+
+  private async *streamAgentLoop(config: HarnessConfig, input: RunInput, traceId: string, memoryContext: ConversationMessage[]): AsyncGenerator<StreamEvent> {
+    const toolCalls: ToolCallResult[] = [];
+    for (let step = 0; step < 3; step += 1) {
+      const action = await this.planNextAction(config, input, memoryContext, toolCalls);
+      yield { type: "agent_action", traceId, data: this.publicAction(action) };
+      if (action.action === "answer") {
+        break;
+      }
+      const call = await this.executeAgentAction(config, input, traceId, action);
+      toolCalls.push(call);
+      yield { type: "tool_call", traceId, data: call };
+      if (!call.ok) {
+        break;
+      }
+    }
+  }
+
+  private async planNextAction(config: HarnessConfig, input: RunInput, memoryContext: ConversationMessage[], toolCalls: ToolCallResult[]): Promise<AgentLoopAction> {
+    if (toolCalls.length > 0) {
+      return { action: "answer" };
+    }
+    const heuristicSearch = config.search?.enabled && toolCalls.length === 0 && needsFreshSearch(input.input);
+    if (heuristicSearch) {
+      return { action: "search", query: input.input, reason: "current-data request" };
+    }
+    if (!config.search?.enabled && this.tools.size === 0) {
+      return { action: "answer" };
+    }
+    return planAgentAction({
+      run: input,
+      memory: memoryContext,
+      tools: [...this.store.tools.values()],
+      toolCalls,
+      capabilities: this.privateCapabilities(config),
+      searchEnabled: Boolean(config.search?.enabled)
+    });
+  }
+
+  private async executeAgentAction(config: HarnessConfig, input: RunInput, traceId: string, action: AgentLoopAction): Promise<ToolCallResult> {
+    if (action.action === "search") {
+      return this.callSearch(config, input, traceId, action.query);
+    }
+    if (action.action === "tool") {
+      return this.callHostTool(config, input, traceId, action);
+    }
+    return { name: "agentAnswer", ok: true, input: {}, output: action.answer ?? "" };
+  }
+
+  private async callHostTool(config: HarnessConfig, input: RunInput, traceId: string, action: Extract<AgentLoopAction, { action: "tool" }>): Promise<ToolCallResult> {
+    const selected = this.tools.get(action.toolName);
+    const candidateInput = action.input ?? {};
     if (!selected) {
-      return [];
+      return { name: action.toolName, ok: false, input: candidateInput, error: "Requested tool is not registered." };
     }
 
     try {
-      const candidateInput = this.deriveToolInput(input.input, selected.name);
       const parsed = selected.inputSchema.safeParse(candidateInput);
       if (!parsed.success) {
-        return [{ name: selected.name, ok: false, input: candidateInput, error: parsed.error.message }];
+        return { name: selected.name, ok: false, input: candidateInput, error: parsed.error.message };
       }
       const output = await selected.execute(parsed.data, {
         userId: input.userId,
@@ -344,24 +404,23 @@ export class RecursiveRuntime {
         appId: config.appId,
         traceId
       });
-      return [{ name: selected.name, ok: true, input: parsed.data, output }];
+      return { name: selected.name, ok: true, input: parsed.data, output };
     } catch (error) {
-      return [{ name: selected.name, ok: false, input: {}, error: error instanceof Error ? error.message : String(error) }];
+      return { name: selected.name, ok: false, input: candidateInput, error: error instanceof Error ? error.message : String(error) };
     }
   }
 
-  private async maybeSearch(config: HarnessConfig, input: RunInput, traceId: string): Promise<ToolCallResult[]> {
-    if (!config.search?.enabled || !needsFreshSearch(input.input)) {
-      return [];
+  private async callSearch(config: HarnessConfig, input: RunInput, traceId: string, query: string): Promise<ToolCallResult> {
+    if (!config.search?.enabled) {
+      return { name: "tinyfishSearch", ok: false, input: { query }, error: "Search is not enabled for this app." };
     }
-
-    const toolInput = { query: input.input };
+    const toolInput = { query };
     try {
-      const output = await searchTinyFish(input.input);
+      const output = await searchTinyFish(query);
       this.store.addActivity({
         kind: "search",
         title: "TinyFish search",
-        detail: input.input,
+        detail: query,
         metadata: {
           userId: input.userId,
           sessionId: input.sessionId,
@@ -370,7 +429,7 @@ export class RecursiveRuntime {
           resultCount: output.results.length
         }
       });
-      return [{ name: "tinyfishSearch", ok: true, input: toolInput, output }];
+      return { name: "tinyfishSearch", ok: true, input: toolInput, output };
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       this.store.addActivity({
@@ -382,10 +441,10 @@ export class RecursiveRuntime {
           sessionId: input.sessionId,
           appId: config.appId,
           traceId,
-          query: input.input
+          query
         }
       });
-      return [{ name: "tinyfishSearch", ok: false, input: toolInput, error: message }];
+      return { name: "tinyfishSearch", ok: false, input: toolInput, error: message };
     }
   }
 
@@ -399,16 +458,18 @@ export class RecursiveRuntime {
     });
   }
 
-  private deriveToolInput(text: string, toolName: string): Record<string, unknown> {
-    const quoted = text.match(/["']([^"']+)["']/)?.[1];
-    const called = text.match(new RegExp(`${toolName}\\s+([\\w -]+)`, "i"))?.[1]?.trim();
-    return {
-      name: quoted ?? called ?? "untitled"
-    };
-  }
-
   private missingModelError(): never {
     throw new Error("Ollama is not configured. Set OLLAMA_API_KEY before calling chat(), run(), or runStream().");
+  }
+
+  private publicAction(action: AgentLoopAction): Record<string, unknown> {
+    if (action.action === "search") {
+      return { action: "search", query: action.query };
+    }
+    if (action.action === "tool") {
+      return { action: "tool", toolName: action.toolName };
+    }
+    return { action: "answer" };
   }
 
   private async readMemoryContext(config: HarnessConfig, input: RunInput): Promise<ConversationMessage[]> {
