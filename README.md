@@ -225,7 +225,7 @@ The VPS agent daemon calls `/v1/agents/recursive-improvement-cycle`. If `agents.
 
 Upstream references are pinned under the "older than 7 days" rule:
 
-- Claude Agent SDK TypeScript: `@anthropic-ai/claude-agent-sdk@0.3.168`, published June 6, 2026.
+- OpenAI Agents SDK JavaScript/TypeScript: `@openai/agents@0.11.6`, MIT, published May 29, 2026.
 - OpenAI Codex CLI: `@openai/codex@0.137.0`, published June 4, 2026.
 - Hermes Agent: git tag `v2026.6.5`, used as an architectural reference only; the current repo result was marked today, so it is not installed as a package.
 

@@ -13,15 +13,15 @@ import type {
 
 export const upstreamAgentSources: UpstreamAgentSource[] = [
   {
-    id: "claude-agent-sdk",
-    name: "Claude Agent SDK TypeScript",
-    sourceUrl: "https://github.com/anthropics/claude-agent-sdk-typescript",
-    pinnedVersion: "0.3.168",
+    id: "openai-agents-sdk",
+    name: "OpenAI Agents SDK JavaScript/TypeScript",
+    sourceUrl: "https://github.com/openai/openai-agents-js",
+    pinnedVersion: "0.11.6",
     license: "MIT",
     installed: true,
     notes: [
-      "Agent loop and context-management reference.",
-      "Pinned to June 6, 2026 npm package under the 7-day safety rule."
+      "Multi-agent workflows, sessions, handoffs, guardrails, tracing, and sandbox-agent reference.",
+      "Pinned to May 29, 2026 npm package under the 7-day safety rule."
     ]
   },
   {

@@ -117,7 +117,7 @@ export interface TrainingExportOptions {
 export type RecursiveAgentRole = "researcher" | "upgrader";
 
 export interface UpstreamAgentSource {
-  id: "claude-agent-sdk" | "codex-cli" | "hermes-agent";
+  id: "openai-agents-sdk" | "codex-cli" | "hermes-agent";
   name: string;
   sourceUrl: string;
   pinnedVersion: string;
