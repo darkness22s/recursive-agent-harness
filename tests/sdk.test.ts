@@ -413,6 +413,65 @@ describe("RecursiveHarness SDK", () => {
       })
     );
   });
+
+  it("runs researcher and upgrader agents and queues a VPS upgrade task", async () => {
+    const ollamaKey = process.env.OLLAMA_API_KEY;
+    process.env.OLLAMA_API_KEY = "test-ollama-key";
+    const fetchMock = vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        message: {
+          content: JSON.stringify({
+            title: "Improve memory continuity",
+            problem: "Users ask follow-up questions and expect prior turns to be available.",
+            evidence: ["follow-up question after first turn"],
+            recommendedChange: "Expose stronger session memory defaults and tests.",
+            expectedImpact: "Better multi-turn chat.",
+            risk: "low",
+            updateKind: "runtime_policy",
+            payload: { memory: "session-default" }
+          })
+        }
+      }), { status: 200, headers: { "content-type": "application/json" } }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        message: {
+          content: JSON.stringify({
+            summary: "Apply session memory policy update",
+            updateTitle: "Session memory policy",
+            updateDescription: "Use prior session turns when answering follow-ups.",
+            updateKind: "runtime_policy",
+            payload: { memoryPolicy: "session-continuity" },
+            reasons: ["Researcher found follow-up failures"]
+          })
+        }
+      }), { status: 200, headers: { "content-type": "application/json" } }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ ok: true }), { status: 200 }));
+
+    const harness = RecursiveHarness.create({
+      ...config,
+      updates: { webhookUrl: "https://example.com/updates", apiKey: "secret", channel: "production" },
+      agents: { workerId: "sparky-vps", autoQueueUpgrades: true }
+    });
+    harness.trackExperience({
+      userId: "user_1",
+      sessionId: "session_1",
+      message: "it forgot what I said",
+      response: "sorry",
+      outcome: "failed"
+    });
+
+    const result = await harness.runRecursiveImprovementCycle();
+
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(result?.proposal.title).toBe("Improve memory continuity");
+    expect(result?.plan.status).toBe("queued");
+    expect(result?.plan.taskId).toBeTruthy();
+
+    if (ollamaKey) {
+      process.env.OLLAMA_API_KEY = ollamaKey;
+    } else {
+      delete process.env.OLLAMA_API_KEY;
+    }
+  });
 });
 
 describe("RecursiveRuntime successor loop", () => {

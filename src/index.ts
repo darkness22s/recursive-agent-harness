@@ -7,6 +7,7 @@ export { getTinyFishConfig, isTinyFishConfigured, needsFreshSearch, searchTinyFi
 export { FileConversationMemory, createMemoryFromConfig } from "./memory.js";
 export { deliverAppUpdate } from "./updates.js";
 export { exportTrainingData } from "./training-export.js";
+export { createResearchProposal, createUpgradePlan, upstreamAgentSources } from "./recursive-agents.js";
 export type {
   AppSnapshot,
   AppUpdatePackage,
@@ -16,6 +17,7 @@ export type {
   ExperienceEvent,
   ExperienceSignals,
   HarnessConfig,
+  ImprovementProposal,
   OptimizationTarget,
   Outcome,
   PromotionRecord,
@@ -27,6 +29,8 @@ export type {
   TrainingExportOptions,
   ToolContext,
   ToolDefinition,
-  ToolManifest
+  ToolManifest,
+  UpgradePlan,
+  UpstreamAgentSource
 } from "./types.js";
 export type { TinyFishConfig, TinyFishSearchResponse, TinyFishSearchResult } from "./tinyfish.js";

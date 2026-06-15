@@ -72,6 +72,11 @@ export function createRuntimeServer(runtime = new RecursiveRuntime()): Hono {
     return context.json(await runtime.exportTrainingData(body.options));
   });
 
+  app.post("/v1/agents/recursive-improvement-cycle", async (context) => {
+    const body = (await context.req.json()) as { config: HarnessConfig };
+    return context.json(await runtime.runRecursiveImprovementCycle(body.config));
+  });
+
   app.post("/v1/recursion/tick", (context) => context.json(runtime.tick()));
 
   app.post("/v1/agent/summary", (context) => context.json(runtime.createFiveHourSummary()));

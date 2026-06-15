@@ -1,6 +1,6 @@
 {
   "name": "@darkness22s/recursive-harness-engine",
-  "version": "0.2.3",
+  "version": "0.3.0",
   "description": "Framework-style TypeScript SDK and autonomous recursive agent harness runtime.",
   "type": "module",
   "main": "dist/index.js",
@@ -20,6 +20,7 @@
     "dev:runtime": "tsx src/cli/runtime-server.ts",
     "dev:sample": "tsx examples/sample-app.ts",
     "dev:local-worker": "tsx src/cli/local-worker.ts",
+    "dev:agents": "tsx src/cli/recursive-agent-daemon.ts",
     "smoke:local": "tsx scripts/smoke-local.ts",
     "deploy:cloudflare": "npx wrangler deploy"
   },
@@ -46,10 +47,14 @@
     "zod": "^4.1.13"
   },
   "devDependencies": {
-    "@types/node": "^24.10.1",
     "@cloudflare/workers-types": "^4.20260613.0",
+    "@types/node": "^24.10.1",
     "tsx": "^4.21.0",
     "typescript": "^5.9.3",
     "vitest": "^4.0.15"
+  },
+  "optionalDependencies": {
+    "@anthropic-ai/claude-agent-sdk": "0.3.168",
+    "@openai/codex": "0.137.0"
   }
 }

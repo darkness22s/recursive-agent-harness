@@ -129,4 +129,8 @@ export class RuntimeHttpClient {
   exportTrainingData(options?: TrainingExportOptions): Promise<{ format: "jsonl"; count: number; content: string; path?: string }> {
     return postJson(this.config.runtimeUrl, "/v1/training/export", this.config.apiKey, { options });
   }
+
+  runRecursiveImprovementCycle(): Promise<unknown> {
+    return postJson(this.config.runtimeUrl, "/v1/agents/recursive-improvement-cycle", this.config.apiKey, { config: this.config });
+  }
 }

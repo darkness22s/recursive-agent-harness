@@ -6,6 +6,7 @@ import type {
   AppUpdatePackage,
   ConversationMessage,
   ExperienceEvent,
+  ImprovementProposal,
   LocalTask,
   LocalWorkerRecord,
   PromotionRecord,
@@ -28,6 +29,7 @@ export class InMemoryHarnessStore {
   readonly localTasks: LocalTask[] = [];
   readonly memories: ConversationMessage[] = [];
   readonly updates: AppUpdatePackage[] = [];
+  readonly proposals: ImprovementProposal[] = [];
 
   constructor() {
     this.images.push({
@@ -113,6 +115,22 @@ export class InMemoryHarnessStore {
       createdAt: update.createdAt ?? new Date().toISOString()
     };
     this.updates.push(saved);
+    return saved;
+  }
+
+  addProposal(proposal: ImprovementProposal): ImprovementProposal {
+    const saved = {
+      ...proposal,
+      id: proposal.id ?? nanoid(),
+      createdAt: proposal.createdAt ?? new Date().toISOString()
+    };
+    this.proposals.push(saved);
+    this.addActivity({
+      kind: "research",
+      title: saved.title,
+      detail: saved.problem,
+      metadata: { proposalId: saved.id, risk: saved.risk, expectedImpact: saved.expectedImpact }
+    });
     return saved;
   }
 

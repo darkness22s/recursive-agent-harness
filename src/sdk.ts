@@ -150,6 +150,13 @@ export class RecursiveHarness {
     return this.httpClient?.exportTrainingData(options);
   }
 
+  runRecursiveImprovementCycle() {
+    if (this.localRuntime) {
+      return this.localRuntime.runRecursiveImprovementCycle(this.config);
+    }
+    return this.httpClient?.runRecursiveImprovementCycle();
+  }
+
   detectProfanity(text: string): boolean {
     return detectProfanity(text);
   }

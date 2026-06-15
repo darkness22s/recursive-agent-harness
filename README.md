@@ -195,6 +195,40 @@ await harness.sendUpdate({
 
 Your host app decides how to apply the update. The SDK sends structured update packages; it does not force arbitrary code into user devices.
 
+## Recursive Researcher And Upgrader Agents
+
+The recursive improvement system is now split into two private agents:
+
+- **Researcher**: monitors user experience events, registered tools, update history, and upstream agent architecture references. It proposes one evidence-backed SDK/runtime improvement as JSON.
+- **Upgrader**: takes the Researcher proposal and converts it into a structured app update package plus an optional VPS task.
+
+The loop is model-driven through Ollama. It is not a table of hard-coded fixes. The Researcher is instructed to avoid hard-coded end-user replies and to prefer configurable, test-covered behavior changes.
+
+Run one cycle from SDK code:
+
+```ts
+const result = await harness.runRecursiveImprovementCycle();
+console.log(result.proposal, result.plan);
+```
+
+Run the private agents on the VPS:
+
+```bash
+export RECURSIVE_RUNTIME_URL="https://your-worker.your-subdomain.workers.dev"
+export RECURSIVE_HARNESS_API_KEY="same_runtime_key_as_cloud"
+export RECURSIVE_AGENT_WORKER_ID="sparky-vps"
+export RECURSIVE_AGENT_INTERVAL_MS=1800000
+npm run dev:agents
+```
+
+The VPS agent daemon calls `/v1/agents/recursive-improvement-cycle`. If `agents.autoQueueUpgrades` is enabled, the Upgrader queues a task for that VPS worker. The VPS is for private harness operations, not per-user chat.
+
+Upstream references are pinned under the "older than 7 days" rule:
+
+- Claude Agent SDK TypeScript: `@anthropic-ai/claude-agent-sdk@0.3.168`, published June 6, 2026.
+- OpenAI Codex CLI: `@openai/codex@0.137.0`, published June 4, 2026.
+- Hermes Agent: git tag `v2026.6.5`, used as an architectural reference only; the current repo result was marked today, so it is not installed as a package.
+
 ## Training Data Export
 
 Export conversation pairs and outcomes as JSONL for later model training or fine-tuning pipelines:

@@ -28,6 +28,11 @@ export interface HarnessConfig {
     apiKey?: string;
     channel?: string;
   };
+  agents?: {
+    workerId?: string;
+    researchCadenceMinutes?: number;
+    autoQueueUpgrades?: boolean;
+  };
 }
 
 export interface ToolContext {
@@ -107,6 +112,44 @@ export interface TrainingExportOptions {
   path?: string;
   includeToolCalls?: boolean;
   includeExperience?: boolean;
+}
+
+export type RecursiveAgentRole = "researcher" | "upgrader";
+
+export interface UpstreamAgentSource {
+  id: "claude-agent-sdk" | "codex-cli" | "hermes-agent";
+  name: string;
+  sourceUrl: string;
+  pinnedVersion: string;
+  license: string;
+  installed: boolean;
+  notes: string[];
+}
+
+export interface ImprovementProposal {
+  id?: string;
+  createdAt?: string;
+  researcherId: string;
+  title: string;
+  problem: string;
+  evidence: string[];
+  recommendedChange: string;
+  expectedImpact: string;
+  risk: "low" | "medium" | "high";
+  updateKind: AppUpdatePackage["kind"];
+  payload: Record<string, unknown>;
+}
+
+export interface UpgradePlan {
+  id?: string;
+  createdAt?: string;
+  upgraderId: string;
+  proposalId: string;
+  status: "planned" | "queued" | "applied" | "rejected";
+  summary: string;
+  update?: AppUpdatePackage;
+  taskId?: string;
+  reasons: string[];
 }
 
 export interface ExperienceSignals {
@@ -205,6 +248,9 @@ export type ActivityKind =
   | "memory"
   | "update"
   | "training_export"
+  | "agent"
+  | "research"
+  | "upgrade"
   | "local_worker"
   | "local_task";
 

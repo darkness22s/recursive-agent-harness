@@ -6,6 +6,7 @@ import type {
   EvaluationReport,
   ExperienceEvent,
   HarnessConfig,
+  ImprovementProposal,
   PromotionRecord,
   RunInput,
   RunResult,
@@ -26,6 +27,7 @@ import { needsFreshSearch, searchTinyFish, type TinyFishSearchResult } from "./t
 import { createMemoryFromConfig } from "./memory.js";
 import { deliverAppUpdate } from "./updates.js";
 import { exportTrainingData } from "./training-export.js";
+import { createResearchProposal, createUpgradePlan } from "./recursive-agents.js";
 
 export interface RuntimeTickResult {
   candidateId: string;
@@ -250,6 +252,40 @@ export class RecursiveRuntime {
     return result;
   }
 
+  async runRecursiveImprovementCycle(config: HarnessConfig): Promise<{ proposal: ImprovementProposal; plan: Awaited<ReturnType<typeof createUpgradePlan>> }> {
+    const proposal = this.store.addProposal(await createResearchProposal({
+      config,
+      events: this.store.events,
+      tools: [...this.store.tools.values()],
+      recentUpdates: this.store.updates
+    }));
+    const plan = await createUpgradePlan(config, proposal);
+    let appliedPlan = plan;
+
+    if (plan.update) {
+      const update = await this.deliverUpdate(config, plan.update);
+      appliedPlan = { ...appliedPlan, update, status: "applied" };
+    }
+
+    if (config.agents?.autoQueueUpgrades && config.agents.workerId) {
+      const task = this.store.enqueueLocalTask({
+        workerId: config.agents.workerId,
+        shell: "bash",
+        command: `printf '%s' '${escapeSingleQuotedJson({ proposal, plan: appliedPlan })}' > recursive-upgrade-${proposal.id}.json`
+      });
+      appliedPlan = { ...appliedPlan, taskId: task.id, status: "queued" };
+    }
+
+    this.store.addActivity({
+      kind: "upgrade",
+      title: appliedPlan.summary,
+      detail: `Researcher proposal ${proposal.id} handled by upgrader ${appliedPlan.upgraderId}`,
+      metadata: { proposalId: proposal.id, planId: appliedPlan.id, status: appliedPlan.status, taskId: appliedPlan.taskId }
+    });
+
+    return { proposal, plan: appliedPlan };
+  }
+
   tick(): RuntimeTickResult {
     const active = this.store.activeImage();
     const findings = summarizeExperience(this.store.events);
@@ -398,4 +434,8 @@ export class RecursiveRuntime {
       "training data export"
     ].filter(Boolean) as string[];
   }
+}
+
+function escapeSingleQuotedJson(value: unknown): string {
+  return JSON.stringify(value).replace(/'/g, "'\\''");
 }
