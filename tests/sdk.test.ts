@@ -244,6 +244,77 @@ describe("RecursiveHarness SDK", () => {
       ok: false,
       error: "Tool requires host approval before execution."
     });
+    expect(result.toolCalls[0]?.approvalId).toEqual(expect.any(String));
+
+    if (ollamaKey) {
+      process.env.OLLAMA_API_KEY = ollamaKey;
+    } else {
+      delete process.env.OLLAMA_API_KEY;
+    }
+  });
+
+  it("resumes a high-risk tool after explicit host approval", async () => {
+    const ollamaKey = process.env.OLLAMA_API_KEY;
+    process.env.OLLAMA_API_KEY = "test-ollama-key";
+    vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ message: { content: JSON.stringify({ action: "tool", toolName: "deleteAccount", input: { id: "user_1" } }) } }), {
+          status: 200,
+          headers: { "content-type": "application/json" }
+        })
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ message: { content: "Approval is required." } }), {
+          status: 200,
+          headers: { "content-type": "application/json" }
+        })
+      );
+    const harness = RecursiveHarness.create({
+      ...config,
+      appId: `approval-flow-${Date.now()}`
+    });
+    const executed: string[] = [];
+
+    harness.registerTool({
+      name: "deleteAccount",
+      description: "Deletes an account",
+      risk: "high",
+      requiresApproval: true,
+      inputSchema: z.object({ id: z.string() }),
+      execute: (input, context) => {
+        executed.push(`${context.userId}:${input.id}`);
+        return { deleted: true, id: input.id };
+      }
+    });
+
+    const result = await harness.run({
+      userId: "user_1",
+      sessionId: "approval_resume",
+      input: "delete my account"
+    });
+    const approvalId = result.toolCalls[0]?.approvalId;
+
+    expect(approvalId).toEqual(expect.any(String));
+    expect(executed).toEqual([]);
+    expect(await harness.listPendingApprovals()).toEqual([
+      expect.objectContaining({
+        id: approvalId,
+        toolName: "deleteAccount",
+        status: "pending",
+        input: { id: "user_1" }
+      })
+    ]);
+
+    const approved = await harness.approveToolCall(String(approvalId), { approved: true, reason: "User confirmed destructive action." });
+
+    expect(approved).toMatchObject({
+      name: "deleteAccount",
+      ok: true,
+      input: { id: "user_1" },
+      output: { deleted: true, id: "user_1" }
+    });
+    expect(executed).toEqual(["user_1:user_1"]);
+    expect(await harness.listPendingApprovals()).toEqual([]);
 
     if (ollamaKey) {
       process.env.OLLAMA_API_KEY = ollamaKey;

@@ -9,6 +9,7 @@ import type {
   ImprovementProposal,
   LocalTask,
   LocalWorkerRecord,
+  PendingToolApproval,
   PromotionRecord,
   RuntimeImage,
   StatusReport,
@@ -30,6 +31,7 @@ export class InMemoryHarnessStore {
   readonly memories: ConversationMessage[] = [];
   readonly updates: AppUpdatePackage[] = [];
   readonly proposals: ImprovementProposal[] = [];
+  readonly pendingApprovals = new Map<string, PendingToolApproval>();
 
   constructor() {
     this.images.push({
@@ -136,6 +138,46 @@ export class InMemoryHarnessStore {
 
   addTool(tool: ToolManifest): void {
     this.tools.set(tool.name, tool);
+  }
+
+  addPendingApproval(input: Omit<PendingToolApproval, "id" | "createdAt" | "status">): PendingToolApproval {
+    const approval: PendingToolApproval = {
+      ...input,
+      id: nanoid(),
+      status: "pending",
+      createdAt: new Date().toISOString()
+    };
+    this.pendingApprovals.set(approval.id, approval);
+    this.addActivity({
+      kind: "approval",
+      title: "Tool approval requested",
+      detail: `${approval.toolName}: ${approval.reason}`,
+      metadata: { approvalId: approval.id, userId: approval.userId, sessionId: approval.sessionId, appId: approval.appId }
+    });
+    return approval;
+  }
+
+  decidePendingApproval(approvalId: string, approved: boolean): PendingToolApproval {
+    const approval = this.pendingApprovals.get(approvalId);
+    if (!approval) {
+      throw new Error(`Approval not found: ${approvalId}`);
+    }
+    if (approval.status !== "pending") {
+      throw new Error(`Approval is already ${approval.status}: ${approvalId}`);
+    }
+    const next: PendingToolApproval = {
+      ...approval,
+      status: approved ? "approved" : "rejected",
+      decidedAt: new Date().toISOString()
+    };
+    this.pendingApprovals.set(approvalId, next);
+    this.addActivity({
+      kind: "approval",
+      title: `Tool approval ${next.status}`,
+      detail: next.toolName,
+      metadata: { approvalId, userId: next.userId, sessionId: next.sessionId, appId: next.appId }
+    });
+    return next;
   }
 
   addImage(image: RuntimeImage): RuntimeImage {

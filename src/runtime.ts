@@ -12,6 +12,8 @@ import type {
   RunResult,
   StreamEvent,
   TrainingExportOptions,
+  PendingToolApproval,
+  ToolApprovalDecision,
   ToolCallResult,
   ToolDefinition,
   ToolManifest
@@ -251,6 +253,33 @@ export class RecursiveRuntime {
     return result;
   }
 
+  listPendingApprovals(): PendingToolApproval[] {
+    return [...this.store.pendingApprovals.values()].filter((approval) => approval.status === "pending");
+  }
+
+  async approveToolCall(config: HarnessConfig, approvalId: string, decision: ToolApprovalDecision): Promise<ToolCallResult> {
+    const approval = this.store.decidePendingApproval(approvalId, decision.approved);
+    if (!decision.approved) {
+      return {
+        name: approval.toolName,
+        ok: false,
+        input: approval.input,
+        approvalId,
+        error: decision.reason ?? "Tool approval was rejected."
+      };
+    }
+
+    const selected = this.tools.get(approval.toolName);
+    if (selected) {
+      return this.executeRegisteredTool(config, {
+        userId: approval.userId,
+        sessionId: approval.sessionId,
+        input: "",
+      }, approval.traceId, selected, approval.input);
+    }
+    return this.executeRemoteManifestTool(config, approval, approval.input);
+  }
+
   async runRecursiveImprovementCycle(config: HarnessConfig): Promise<{ proposal: ImprovementProposal; plan: Awaited<ReturnType<typeof createUpgradePlan>> }> {
     const proposal = this.store.addProposal(await createResearchProposal({
       config,
@@ -416,14 +445,28 @@ export class RecursiveRuntime {
       return this.callRemoteManifestTool(config, input, traceId, action.toolName, candidateInput);
     }
     if (selected.requiresApproval || selected.risk === "high") {
+      const approval = this.store.addPendingApproval({
+        appId: config.appId,
+        userId: input.userId,
+        sessionId: input.sessionId,
+        traceId,
+        toolName: selected.name,
+        input: candidateInput,
+        reason: "Tool is marked high risk or requires approval."
+      });
       return {
         name: selected.name,
         ok: false,
         input: candidateInput,
+        approvalId: approval.id,
         error: "Tool requires host approval before execution."
       };
     }
 
+    return this.executeRegisteredTool(config, input, traceId, selected, candidateInput);
+  }
+
+  private async executeRegisteredTool(config: HarnessConfig, input: RunInput, traceId: string, selected: ToolDefinition, candidateInput: unknown): Promise<ToolCallResult> {
     try {
       const parsed = selected.inputSchema.safeParse(candidateInput);
       if (!parsed.success) {
@@ -447,16 +490,34 @@ export class RecursiveRuntime {
       return { name: toolName, ok: false, input: candidateInput, error: "Requested tool is not registered." };
     }
     if (manifest.requiresApproval || manifest.risk === "high") {
+      const approval = this.store.addPendingApproval({
+        appId: config.appId,
+        userId: input.userId,
+        sessionId: input.sessionId,
+        traceId,
+        toolName,
+        input: candidateInput,
+        reason: "Tool manifest is marked high risk or requires approval."
+      });
       return {
         name: toolName,
         ok: false,
         input: candidateInput,
+        approvalId: approval.id,
         error: "Tool requires host approval before execution."
       };
     }
+    return this.executeRemoteManifestTool(config, { appId: config.appId, userId: input.userId, sessionId: input.sessionId, traceId, toolName } , candidateInput);
+  }
+
+  private async executeRemoteManifestTool(
+    config: HarnessConfig,
+    context: Pick<PendingToolApproval, "appId" | "userId" | "sessionId" | "traceId" | "toolName">,
+    candidateInput: unknown
+  ): Promise<ToolCallResult> {
     if (!config.toolExecutor?.webhookUrl) {
       return {
-        name: toolName,
+        name: context.toolName,
         ok: false,
         input: candidateInput,
         error: "Tool is registered as a manifest only. Configure toolExecutor.webhookUrl to execute hosted custom tools."
@@ -471,34 +532,34 @@ export class RecursiveRuntime {
           ...(config.toolExecutor.apiKey ? { authorization: `Bearer ${config.toolExecutor.apiKey}` } : {})
         },
         body: JSON.stringify({
-          appId: config.appId,
-          toolName,
+          appId: context.appId,
+          toolName: context.toolName,
           input: candidateInput,
           context: {
-            userId: input.userId,
-            sessionId: input.sessionId,
-            appId: config.appId,
-            traceId
+            userId: context.userId,
+            sessionId: context.sessionId,
+            appId: context.appId,
+            traceId: context.traceId
           }
         })
       });
       const payload = await response.json().catch(() => ({})) as { ok?: boolean; output?: unknown; error?: string };
       if (!response.ok || payload.ok === false) {
         return {
-          name: toolName,
+          name: context.toolName,
           ok: false,
           input: candidateInput,
           error: payload.error ?? `Tool executor failed: ${response.status}`
         };
       }
       return {
-        name: toolName,
+        name: context.toolName,
         ok: true,
         input: candidateInput,
         output: Object.prototype.hasOwnProperty.call(payload, "output") ? payload.output : payload
       };
     } catch (error) {
-      return { name: toolName, ok: false, input: candidateInput, error: error instanceof Error ? error.message : String(error) };
+      return { name: context.toolName, ok: false, input: candidateInput, error: error instanceof Error ? error.message : String(error) };
     }
   }
 

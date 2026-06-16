@@ -111,6 +111,26 @@ export interface ToolCallResult {
   input: unknown;
   output?: unknown;
   error?: string;
+  approvalId?: string;
+}
+
+export interface PendingToolApproval {
+  id: string;
+  appId: string;
+  userId: string;
+  sessionId: string;
+  traceId: string;
+  toolName: string;
+  input: unknown;
+  reason: string;
+  status: "pending" | "approved" | "rejected" | "expired";
+  createdAt: string;
+  decidedAt?: string;
+}
+
+export interface ToolApprovalDecision {
+  approved: boolean;
+  reason?: string;
 }
 
 export interface ConversationMessage {
@@ -279,6 +299,7 @@ export type ActivityKind =
   | "agent"
   | "research"
   | "upgrade"
+  | "approval"
   | "local_worker"
   | "local_task";
 

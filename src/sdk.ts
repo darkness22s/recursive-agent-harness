@@ -11,6 +11,9 @@ import type {
   RunInput,
   RunResult,
   StreamEvent,
+  PendingToolApproval,
+  ToolApprovalDecision,
+  ToolCallResult,
   ToolDefinition,
   TrainingExportOptions
 } from "./types.js";
@@ -151,6 +154,20 @@ export class RecursiveHarness {
       return this.localRuntime.runRecursiveImprovementCycle(this.config);
     }
     return this.httpClient?.runRecursiveImprovementCycle();
+  }
+
+  listPendingApprovals(): Promise<PendingToolApproval[]> | PendingToolApproval[] {
+    if (this.localRuntime) {
+      return this.localRuntime.listPendingApprovals();
+    }
+    return this.httpClient?.listPendingApprovals() as Promise<PendingToolApproval[]>;
+  }
+
+  approveToolCall(approvalId: string, decision: ToolApprovalDecision): Promise<ToolCallResult> {
+    if (this.localRuntime) {
+      return this.localRuntime.approveToolCall(this.config, approvalId, decision);
+    }
+    return this.httpClient?.approveToolCall(approvalId, decision) as Promise<ToolCallResult>;
   }
 
   detectProfanity(text: string): boolean {

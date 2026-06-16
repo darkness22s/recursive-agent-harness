@@ -8,6 +8,9 @@ import type {
   RunResult,
   RuntimeImage,
   StreamEvent,
+  PendingToolApproval,
+  ToolApprovalDecision,
+  ToolCallResult,
   TrainingExportOptions,
   ToolManifest
 } from "./types.js";
@@ -132,5 +135,16 @@ export class RuntimeHttpClient {
 
   runRecursiveImprovementCycle(): Promise<unknown> {
     return postJson(this.config.runtimeUrl, "/v1/agents/recursive-improvement-cycle", this.config.apiKey, { config: this.config });
+  }
+
+  listPendingApprovals(): Promise<PendingToolApproval[]> {
+    return getJson(this.config.runtimeUrl, "/v1/tool-approvals", this.config.apiKey);
+  }
+
+  approveToolCall(approvalId: string, decision: ToolApprovalDecision): Promise<ToolCallResult> {
+    return postJson(this.config.runtimeUrl, `/v1/tool-approvals/${approvalId}/decision`, this.config.apiKey, {
+      config: this.config,
+      decision
+    });
   }
 }

@@ -100,6 +100,18 @@ harness.registerTool({
 });
 ```
 
+When the planner selects a risky tool, the result includes an `approvalId` instead of executing the tool. Your app can list and approve pending calls:
+
+```ts
+const pending = await harness.listPendingApprovals();
+const result = await harness.approveToolCall(pending[0].id, {
+  approved: true,
+  reason: "User confirmed this action in the UI."
+});
+```
+
+Hosted runtimes expose the same flow at `GET /v1/tool-approvals` and `POST /v1/tool-approvals/:approvalId/decision`.
+
 See `docs/agent-loop-research.md` for the architecture research and the SDK contract behind this loop.
 
 ## Built-In Agent Workbench Tools

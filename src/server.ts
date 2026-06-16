@@ -77,6 +77,15 @@ export function createRuntimeServer(runtime = new RecursiveRuntime()): Hono {
     return context.json(await runtime.runRecursiveImprovementCycle(body.config));
   });
 
+  app.get("/v1/tool-approvals", (context) => {
+    return context.json(runtime.listPendingApprovals());
+  });
+
+  app.post("/v1/tool-approvals/:approvalId/decision", async (context) => {
+    const body = (await context.req.json()) as { config: HarnessConfig; decision: Parameters<RecursiveRuntime["approveToolCall"]>[2] };
+    return context.json(await runtime.approveToolCall(body.config, context.req.param("approvalId"), body.decision));
+  });
+
   app.post("/v1/recursion/tick", (context) => context.json(runtime.tick()));
 
   app.post("/v1/agent/summary", (context) => context.json(runtime.createFiveHourSummary()));
