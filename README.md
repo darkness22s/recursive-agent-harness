@@ -104,7 +104,7 @@ See `docs/agent-loop-research.md` for the architecture research and the SDK cont
 
 ## Built-In Agent Workbench Tools
 
-For local development or a trusted server runtime, the SDK can register built-in tools similar to the primitives used by coding agents:
+For local development or a trusted server runtime, the SDK/runtime can register built-in tools similar to the primitives used by coding agents:
 
 - `readFile`: read text files inside a workspace.
 - `writeFile`: write or append text files inside a workspace.
@@ -112,7 +112,7 @@ For local development or a trusted server runtime, the SDK can register built-in
 - `runCommand`: run shell commands from the workspace.
 - `noteDislikedResult`: record disliked outputs so the agent can avoid repeating them.
 
-They are off by default. Enable only the capabilities your app/runtime should expose:
+They are off by default. Enable only the capabilities your app/runtime should expose. The same config works with `runtimeUrl: "local"` and with the runtime server `/v1/run` path:
 
 ```ts
 const harness = RecursiveHarness.create({

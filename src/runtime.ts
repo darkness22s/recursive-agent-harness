@@ -22,6 +22,7 @@ import { reflectionNarrative, summarizeExperience } from "./reflection.js";
 import { buildSuccessorImage } from "./successor.js";
 import { evaluateSuccessor } from "./evaluator.js";
 import { applyPromotion, rollbackIfDegraded } from "./promotion.js";
+import { createBuiltInTools } from "./built-in-tools.js";
 import { generateOllamaAnswer, isOllamaConfigured, planAgentAction, streamOllamaAnswer, type AgentLoopAction } from "./ollama.js";
 import { needsFreshSearch, searchTinyFish, type TinyFishSearchResult } from "./tinyfish.js";
 import { createMemoryFromConfig } from "./memory.js";
@@ -59,6 +60,7 @@ export class RecursiveRuntime {
   }
 
   async run(config: HarnessConfig, input: RunInput): Promise<RunResult> {
+    this.ensureBuiltInTools(config);
     const traceId = nanoid();
     const image = this.store.activeImage();
     const memory = createMemoryFromConfig(config);
@@ -122,6 +124,7 @@ export class RecursiveRuntime {
   }
 
   async *runStream(config: HarnessConfig, input: RunInput): AsyncGenerator<StreamEvent> {
+    this.ensureBuiltInTools(config);
     const traceId = nanoid();
     const image = this.store.activeImage();
     yield { type: "start", traceId };
@@ -536,11 +539,18 @@ export class RecursiveRuntime {
       config.memory ? "file-backed memory" : undefined,
       config.search?.enabled ? "current-data search" : undefined,
       this.tools.size > 0 ? "host-registered tools" : undefined,
+      config.builtInTools?.enabled ? "built-in workbench tools" : undefined,
       config.updates?.webhookUrl ? "host app update delivery" : undefined,
       "experience tracking",
       "successor evaluation",
       "training data export"
     ].filter(Boolean) as string[];
+  }
+
+  private ensureBuiltInTools(config: HarnessConfig): void {
+    for (const tool of createBuiltInTools(config)) {
+      this.registerTool(tool);
+    }
   }
 }
 

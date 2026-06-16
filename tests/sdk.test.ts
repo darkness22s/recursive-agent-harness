@@ -306,6 +306,43 @@ describe("RecursiveHarness SDK", () => {
     await rm(workspace, { recursive: true, force: true });
   });
 
+  it("prepares built-in tools inside the runtime for hosted/server execution", async () => {
+    const ollamaKey = process.env.OLLAMA_API_KEY;
+    process.env.OLLAMA_API_KEY = "test-ollama-key";
+    const workspace = join(tmpdir(), `recursive-harness-server-tools-${Date.now()}`);
+    await mkdir(workspace, { recursive: true });
+    await writeFile(join(workspace, "server-note.txt"), "server path works", "utf8");
+
+    vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(new Response(JSON.stringify({ message: { content: JSON.stringify({ action: "tool", toolName: "readFile", input: { path: "server-note.txt" } }) } }), { status: 200, headers: { "content-type": "application/json" } }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ message: { content: JSON.stringify({ action: "answer" }) } }), { status: 200, headers: { "content-type": "application/json" } }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ message: { content: "Read it." } }), { status: 200, headers: { "content-type": "application/json" } }));
+
+    const runtime = new RecursiveRuntime();
+    const result = await runtime.run({
+      ...config,
+      builtInTools: {
+        enabled: true,
+        workspaceRoot: workspace,
+        read: true
+      }
+    }, {
+      userId: "user_1",
+      sessionId: "server_tools",
+      input: "Read server-note.txt"
+    });
+
+    expect(result.toolCalls[0]?.name).toBe("readFile");
+    expect(result.toolCalls[0]?.output).toMatchObject({ content: "server path works" });
+
+    if (ollamaKey) {
+      process.env.OLLAMA_API_KEY = ollamaKey;
+    } else {
+      delete process.env.OLLAMA_API_KEY;
+    }
+    await rm(workspace, { recursive: true, force: true });
+  });
+
   it("detects profanity and anger in user experience traces", () => {
     const harness = RecursiveHarness.create(config);
 
