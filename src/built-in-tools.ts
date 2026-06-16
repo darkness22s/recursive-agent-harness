@@ -16,6 +16,10 @@ const readFileSchema = z.object({
   startLine: z.number().int().positive().optional(),
   endLine: z.number().int().positive().optional()
 });
+const listFilesSchema = z.object({
+  path: z.string().optional(),
+  maxEntries: z.number().int().positive().max(200).optional()
+});
 const writeFileSchema = z.object({
   path: z.string(),
   content: z.string(),
@@ -54,6 +58,44 @@ export function createBuiltInTools(config: HarnessConfig): ToolDefinition[] {
   const workspaceRoot = resolve(options.workspaceRoot ?? process.cwd());
   const maxReadBytes = options.maxReadBytes ?? DEFAULT_MAX_READ_BYTES;
   const tools: ToolDefinition[] = [];
+
+  if (options.list) {
+    tools.push({
+      name: "listFiles",
+      description: "List files and directories directly inside a workspace directory.",
+      inputSchema: listFilesSchema,
+      risk: "low",
+      async execute(input) {
+        const data = input as z.infer<typeof listFilesSchema>;
+        const path = resolveWorkspacePath(workspaceRoot, data.path ?? ".");
+        const info = await stat(path);
+        if (!info.isDirectory()) {
+          throw new Error(`Path is not a directory: ${data.path ?? "."}`);
+        }
+        const entries = await readdir(path, { withFileTypes: true });
+        const maxEntries = data.maxEntries ?? 100;
+        const listed = [];
+        for (const entry of entries.slice(0, maxEntries)) {
+          if (SKIP_DIRS.has(entry.name)) {
+            continue;
+          }
+          const entryPath = resolve(path, entry.name);
+          const entryStat = await stat(entryPath);
+          listed.push({
+            name: entry.name,
+            path: relative(workspaceRoot, entryPath),
+            type: entry.isDirectory() ? "directory" : entry.isFile() ? "file" : "other",
+            bytes: entry.isFile() ? entryStat.size : undefined
+          });
+        }
+        return {
+          path: relative(workspaceRoot, path) || ".",
+          entries: listed,
+          truncated: entries.length > maxEntries
+        };
+      }
+    });
+  }
 
   if (options.read) {
     tools.push({
@@ -139,17 +181,29 @@ export function createBuiltInTools(config: HarnessConfig): ToolDefinition[] {
         if (allowed.length > 0 && !allowed.some((prefix) => command === prefix || command.startsWith(`${prefix} `))) {
           throw new Error(`Command is not allowed by builtInTools.allowedCommands: ${command}`);
         }
-        const result = await execAsync(command, {
-          cwd: workspaceRoot,
-          timeout: data.timeoutMs ?? options.commandTimeoutMs ?? 10_000,
-          windowsHide: true,
-          maxBuffer: 200_000
-        });
-        return {
-          command,
-          stdout: result.stdout,
-          stderr: result.stderr
-        };
+        try {
+          const result = await execAsync(command, {
+            cwd: workspaceRoot,
+            timeout: data.timeoutMs ?? options.commandTimeoutMs ?? 10_000,
+            windowsHide: true,
+            maxBuffer: 200_000
+          });
+          return {
+            command,
+            exitCode: 0,
+            stdout: result.stdout,
+            stderr: result.stderr
+          };
+        } catch (error) {
+          const failed = error as Error & { code?: number | string; stdout?: string; stderr?: string; killed?: boolean };
+          return {
+            command,
+            exitCode: typeof failed.code === "number" ? failed.code : 1,
+            stdout: failed.stdout ?? "",
+            stderr: failed.stderr ?? failed.message,
+            timedOut: Boolean(failed.killed)
+          };
+        }
       }
     });
   }

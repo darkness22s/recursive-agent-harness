@@ -106,6 +106,7 @@ See `docs/agent-loop-research.md` for the architecture research and the SDK cont
 
 For local development or a trusted server runtime, the SDK/runtime can register built-in tools similar to the primitives used by coding agents:
 
+- `listFiles`: list files and directories inside a workspace directory.
 - `readFile`: read text files inside a workspace.
 - `writeFile`: write or append text files inside a workspace.
 - `searchFiles`: search workspace filenames and text content.
@@ -124,6 +125,7 @@ const harness = RecursiveHarness.create({
   builtInTools: {
     enabled: true,
     workspaceRoot: process.cwd(),
+    list: true,
     read: true,
     write: true,
     search: true,
@@ -135,7 +137,7 @@ const harness = RecursiveHarness.create({
 });
 ```
 
-`runCommand` is powerful. Keep `allowedCommands` narrow in product builds. All file paths are resolved inside `workspaceRoot`, so built-in file tools reject path escapes.
+`runCommand` is powerful. Keep `allowedCommands` narrow in product builds. It returns stdout/stderr and an exit code even when the command fails, so the planner can recover from diagnostics. All file paths are resolved inside `workspaceRoot`, so built-in file tools reject path escapes.
 
 Tool manifests sent to the planner include JSON schema input shapes, not just names. For example, the planner sees that `readFile` accepts `path`, `startLine`, and `endLine`, which makes built-in tool calling much less brittle.
 

@@ -31,6 +31,7 @@ export interface HarnessConfig {
   builtInTools?: {
     enabled?: boolean;
     workspaceRoot?: string;
+    list?: boolean;
     read?: boolean;
     write?: boolean;
     search?: boolean;

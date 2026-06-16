@@ -252,7 +252,7 @@ describe("RecursiveHarness SDK", () => {
     }
   });
 
-  it("ships opt-in built-in read, write, search, command, and feedback tools", async () => {
+  it("ships opt-in built-in list, read, write, search, command, and feedback tools", async () => {
     const ollamaKey = process.env.OLLAMA_API_KEY;
     process.env.OLLAMA_API_KEY = "test-ollama-key";
     const workspace = join(tmpdir(), `recursive-harness-tools-${Date.now()}`);
@@ -260,6 +260,7 @@ describe("RecursiveHarness SDK", () => {
     await writeFile(join(workspace, "notes.txt"), "alpha\nbeta\n", "utf8");
 
     const fetchMock = vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(new Response(JSON.stringify({ message: { content: JSON.stringify({ action: "tool", toolName: "listFiles", input: { path: "." } }) } }), { status: 200, headers: { "content-type": "application/json" } }))
       .mockResolvedValueOnce(new Response(JSON.stringify({ message: { content: JSON.stringify({ action: "tool", toolName: "readFile", input: { path: "notes.txt", startLine: 2, endLine: 2 } }) } }), { status: 200, headers: { "content-type": "application/json" } }))
       .mockResolvedValueOnce(new Response(JSON.stringify({ message: { content: JSON.stringify({ action: "tool", toolName: "writeFile", input: { path: "out/result.txt", content: "done" } }) } }), { status: 200, headers: { "content-type": "application/json" } }))
       .mockResolvedValueOnce(new Response(JSON.stringify({ message: { content: JSON.stringify({ action: "tool", toolName: "searchFiles", input: { query: "beta" } }) } }), { status: 200, headers: { "content-type": "application/json" } }))
@@ -274,6 +275,7 @@ describe("RecursiveHarness SDK", () => {
       builtInTools: {
         enabled: true,
         workspaceRoot: workspace,
+        list: true,
         read: true,
         write: true,
         search: true,
@@ -281,7 +283,7 @@ describe("RecursiveHarness SDK", () => {
         feedback: true,
         allowedCommands: ["node"]
       },
-      agentLoop: { maxSteps: 8, maxToolCalls: 6 }
+      agentLoop: { maxSteps: 9, maxToolCalls: 7 }
     });
 
     const result = await harness.run({
@@ -290,13 +292,56 @@ describe("RecursiveHarness SDK", () => {
       input: "Read the note, write a result, search beta, run node, and remember that I disliked vague answers."
     });
 
-    expect(fetchMock).toHaveBeenCalledTimes(7);
-    expect(result.toolCalls.map((call) => call.name)).toEqual(["readFile", "writeFile", "searchFiles", "runCommand", "noteDislikedResult"]);
+    expect(fetchMock).toHaveBeenCalledTimes(8);
+    expect(result.toolCalls.map((call) => call.name)).toEqual(["listFiles", "readFile", "writeFile", "searchFiles", "runCommand", "noteDislikedResult"]);
     expect(result.toolCalls.every((call) => call.ok)).toBe(true);
-    expect(result.toolCalls[0]?.output).toMatchObject({ content: "beta" });
-    expect(result.toolCalls[3]?.output).toMatchObject({ stdout: expect.stringContaining("ok") });
+    expect(result.toolCalls[0]?.output).toMatchObject({ entries: expect.arrayContaining([expect.objectContaining({ name: "notes.txt", type: "file" })]) });
+    expect(result.toolCalls[1]?.output).toMatchObject({ content: "beta" });
+    expect(result.toolCalls[4]?.output).toMatchObject({ exitCode: 0, stdout: expect.stringContaining("ok") });
     expect(await readFile(join(workspace, "out/result.txt"), "utf8")).toBe("done");
     expect(await readFile(join(workspace, ".recursive-harness/disliked-results.jsonl"), "utf8")).toContain("Too vague");
+
+    if (ollamaKey) {
+      process.env.OLLAMA_API_KEY = ollamaKey;
+    } else {
+      delete process.env.OLLAMA_API_KEY;
+    }
+    await rm(workspace, { recursive: true, force: true });
+  });
+
+  it("returns stdout and stderr for failed built-in commands", async () => {
+    const ollamaKey = process.env.OLLAMA_API_KEY;
+    process.env.OLLAMA_API_KEY = "test-ollama-key";
+    const workspace = join(tmpdir(), `recursive-harness-failed-command-${Date.now()}`);
+    await mkdir(workspace, { recursive: true });
+
+    vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(new Response(JSON.stringify({ message: { content: JSON.stringify({ action: "tool", toolName: "runCommand", input: { command: "node -e \"console.error('bad'); process.exit(3)\"" } }) } }), { status: 200, headers: { "content-type": "application/json" } }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ message: { content: JSON.stringify({ action: "answer" }) } }), { status: 200, headers: { "content-type": "application/json" } }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ message: { content: "The command failed with diagnostics." } }), { status: 200, headers: { "content-type": "application/json" } }));
+
+    const harness = RecursiveHarness.create({
+      ...config,
+      appId: `failed-command-${Date.now()}`,
+      builtInTools: {
+        enabled: true,
+        workspaceRoot: workspace,
+        command: true,
+        allowedCommands: ["node"]
+      }
+    });
+
+    const result = await harness.run({
+      userId: "user_1",
+      sessionId: "failed_command",
+      input: "Run the failing node command."
+    });
+
+    expect(result.toolCalls[0]?.ok).toBe(true);
+    expect(result.toolCalls[0]?.output).toMatchObject({
+      exitCode: 3,
+      stderr: expect.stringContaining("bad")
+    });
 
     if (ollamaKey) {
       process.env.OLLAMA_API_KEY = ollamaKey;
