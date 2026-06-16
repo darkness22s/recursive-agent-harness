@@ -1,8 +1,8 @@
-import type { z } from "zod";
 import { createBuiltInTools } from "./built-in-tools.js";
 import { detectAnger, detectProfanity } from "./detectors.js";
 import { RuntimeHttpClient } from "./http-client.js";
 import { RecursiveRuntime } from "./runtime.js";
+import { toolToManifest } from "./tool-manifest.js";
 import type {
   AppSnapshot,
   AppUpdatePackage,
@@ -12,16 +12,8 @@ import type {
   RunResult,
   StreamEvent,
   ToolDefinition,
-  ToolManifest,
   TrainingExportOptions
 } from "./types.js";
-
-function schemaToManifest(schema: z.ZodType): unknown {
-  return {
-    kind: "zod",
-    description: schema.description ?? "Runtime-provided schema"
-  };
-}
 
 export class RecursiveHarness {
   private readonly localRuntime?: RecursiveRuntime;
@@ -47,11 +39,7 @@ export class RecursiveHarness {
   }
 
   registerTool<TInput, TOutput>(tool: ToolDefinition<TInput, TOutput>): void | Promise<{ ok: true }> {
-    const manifest: ToolManifest = {
-      name: tool.name,
-      description: tool.description,
-      schema: schemaToManifest(tool.inputSchema)
-    };
+    const manifest = toolToManifest(tool);
 
     if (this.localRuntime) {
       this.localRuntime.registerTool(tool, manifest);

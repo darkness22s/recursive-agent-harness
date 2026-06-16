@@ -343,6 +343,50 @@ describe("RecursiveHarness SDK", () => {
     await rm(workspace, { recursive: true, force: true });
   });
 
+  it("sends concrete built-in tool input schemas to the planner", async () => {
+    const ollamaKey = process.env.OLLAMA_API_KEY;
+    process.env.OLLAMA_API_KEY = "test-ollama-key";
+    const workspace = join(tmpdir(), `recursive-harness-schema-${Date.now()}`);
+    await mkdir(workspace, { recursive: true });
+    await writeFile(join(workspace, "schema-note.txt"), "shape", "utf8");
+
+    const fetchMock = vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(new Response(JSON.stringify({ message: { content: JSON.stringify({ action: "tool", toolName: "readFile", input: { path: "schema-note.txt" } }) } }), { status: 200, headers: { "content-type": "application/json" } }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ message: { content: JSON.stringify({ action: "answer" }) } }), { status: 200, headers: { "content-type": "application/json" } }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ message: { content: "Read it." } }), { status: 200, headers: { "content-type": "application/json" } }));
+
+    const runtime = new RecursiveRuntime();
+    await runtime.run({
+      ...config,
+      builtInTools: {
+        enabled: true,
+        workspaceRoot: workspace,
+        read: true
+      }
+    }, {
+      userId: "user_1",
+      sessionId: "schema_tools",
+      input: "Read schema-note.txt"
+    });
+
+    const plannerBody = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body)) as { messages: Array<{ role: string; content: string }> };
+    const plannerPayload = JSON.parse(plannerBody.messages.find((message) => message.role === "user")?.content ?? "{}") as {
+      availableTools: Array<{ name: string; schema: { kind?: string; schema?: { properties?: Record<string, unknown>; required?: string[] } } }>;
+    };
+    const readFileTool = plannerPayload.availableTools.find((tool) => tool.name === "readFile");
+    expect(readFileTool?.schema.kind).toBe("json-schema");
+    expect(readFileTool?.schema.schema?.properties).toHaveProperty("path");
+    expect(readFileTool?.schema.schema?.properties).toHaveProperty("startLine");
+    expect(readFileTool?.schema.schema?.required).toContain("path");
+
+    if (ollamaKey) {
+      process.env.OLLAMA_API_KEY = ollamaKey;
+    } else {
+      delete process.env.OLLAMA_API_KEY;
+    }
+    await rm(workspace, { recursive: true, force: true });
+  });
+
   it("detects profanity and anger in user experience traces", () => {
     const harness = RecursiveHarness.create(config);
 

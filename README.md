@@ -137,6 +137,8 @@ const harness = RecursiveHarness.create({
 
 `runCommand` is powerful. Keep `allowedCommands` narrow in product builds. All file paths are resolved inside `workspaceRoot`, so built-in file tools reject path escapes.
 
+Tool manifests sent to the planner include JSON schema input shapes, not just names. For example, the planner sees that `readFile` accepts `path`, `startLine`, and `endLine`, which makes built-in tool calling much less brittle.
+
 ```ts
 import { RecursiveHarness } from "@darkness22s/recursive-harness-engine";
 import { z } from "zod";

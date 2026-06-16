@@ -29,6 +29,7 @@ import { createMemoryFromConfig } from "./memory.js";
 import { deliverAppUpdate } from "./updates.js";
 import { exportTrainingData } from "./training-export.js";
 import { createResearchProposal, createUpgradePlan } from "./recursive-agents.js";
+import { toolToManifest } from "./tool-manifest.js";
 
 export interface RuntimeTickResult {
   candidateId: string;
@@ -48,9 +49,7 @@ export class RecursiveRuntime {
     this.tools.set(tool.name, tool);
     this.store.addTool(
       manifest ?? {
-        name: tool.name,
-        description: tool.description,
-        schema: "zod-schema"
+        ...toolToManifest(tool)
       }
     );
   }

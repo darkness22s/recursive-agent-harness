@@ -72,6 +72,8 @@ export interface ToolManifest {
   name: string;
   description: string;
   schema: unknown;
+  risk?: "low" | "medium" | "high";
+  requiresApproval?: boolean;
 }
 
 export interface RunInput {
