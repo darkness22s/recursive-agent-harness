@@ -113,6 +113,7 @@ For local development or a trusted server runtime, the SDK/runtime can register 
 - `searchFiles`: search workspace filenames and text content.
 - `runCommand`: run shell commands from the workspace.
 - `noteDislikedResult`: record disliked outputs so the agent can avoid repeating them.
+- `listTasks`, `upsertTask`, `completeTask`: maintain a durable agent task list in `.recursive-harness/tasks.json`.
 
 They are off by default. Enable only the capabilities your app/runtime should expose. The same config works with `runtimeUrl: "local"` and with the runtime server `/v1/run` path:
 
@@ -133,6 +134,7 @@ const harness = RecursiveHarness.create({
     search: true,
     command: true,
     feedback: true,
+    tasks: true,
     allowedCommands: ["npm", "node", "git"],
     commandTimeoutMs: 10000
   }
@@ -146,6 +148,8 @@ const harness = RecursiveHarness.create({
 Tool manifests sent to the planner include JSON schema input shapes, not just names. For example, the planner sees that `readFile` accepts `path`, `startLine`, and `endLine`, which makes built-in tool calling much less brittle.
 
 `noteDislikedResult` is not just a log. Recent disliked-result notes for the same `userId` and `sessionId` are loaded into later planner/answer memory, so the agent can avoid patterns the user already rejected instead of apologizing and repeating itself.
+
+The task tools give the agent a persistent planning surface. `upsertTask` records work in progress, `listTasks` lets the next loop inspect unfinished work, and `completeTask` stores the result. This is useful for long-running harness upgrades where the model needs to track progress across turns without exposing internal details to end users.
 
 ## Hosted Custom Tool Execution
 

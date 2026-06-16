@@ -38,6 +38,7 @@ export interface HarnessConfig {
     search?: boolean;
     command?: boolean;
     feedback?: boolean;
+    tasks?: boolean;
     allowedCommands?: string[];
     maxReadBytes?: number;
     commandTimeoutMs?: number;

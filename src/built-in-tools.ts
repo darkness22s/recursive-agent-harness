@@ -45,6 +45,19 @@ const noteDislikedResultSchema = z.object({
   avoid: z.string().optional(),
   preferred: z.string().optional()
 });
+const listTasksSchema = z.object({
+  status: z.enum(["pending", "in_progress", "blocked", "done"]).optional()
+});
+const upsertTaskSchema = z.object({
+  id: z.string().optional(),
+  title: z.string(),
+  status: z.enum(["pending", "in_progress", "blocked", "done"]).optional(),
+  detail: z.string().optional()
+});
+const completeTaskSchema = z.object({
+  id: z.string(),
+  result: z.string().optional()
+});
 
 interface DislikedResultRecord {
   createdAt?: string;
@@ -53,6 +66,16 @@ interface DislikedResultRecord {
   reason?: string;
   avoid?: string;
   preferred?: string;
+}
+
+interface TaskRecord {
+  id: string;
+  title: string;
+  status: "pending" | "in_progress" | "blocked" | "done";
+  detail?: string;
+  result?: string;
+  createdAt: string;
+  updatedAt: string;
 }
 
 export function createBuiltInTools(config: HarnessConfig): ToolDefinition[] {
@@ -276,6 +299,80 @@ export function createBuiltInTools(config: HarnessConfig): ToolDefinition[] {
     });
   }
 
+  if (options.tasks) {
+    tools.push(
+      {
+        name: "listTasks",
+        description: "List the agent's durable workspace task list for planning and progress tracking.",
+        inputSchema: listTasksSchema,
+        risk: "low",
+        async execute(input) {
+          const data = input as z.infer<typeof listTasksSchema>;
+          const records = await readTaskRecords(workspaceRoot);
+          return {
+            tasks: records.filter((record) => !data.status || record.status === data.status)
+          };
+        }
+      },
+      {
+        name: "upsertTask",
+        description: "Create or update a durable task in the agent's workspace task list.",
+        inputSchema: upsertTaskSchema,
+        risk: "low",
+        async execute(input) {
+          const data = input as z.infer<typeof upsertTaskSchema>;
+          const records = await readTaskRecords(workspaceRoot);
+          const now = new Date().toISOString();
+          const existing = data.id ? records.find((record) => record.id === data.id) : undefined;
+          const record: TaskRecord = existing
+            ? {
+                ...existing,
+                title: data.title,
+                status: data.status ?? existing.status,
+                detail: data.detail ?? existing.detail,
+                updatedAt: now
+              }
+            : {
+                id: data.id ?? taskId(data.title, now),
+                title: data.title,
+                status: data.status ?? "pending",
+                detail: data.detail,
+                createdAt: now,
+                updatedAt: now
+              };
+          const next = existing
+            ? records.map((item) => item.id === record.id ? record : item)
+            : [...records, record];
+          await writeTaskRecords(workspaceRoot, next);
+          return { task: record };
+        }
+      },
+      {
+        name: "completeTask",
+        description: "Mark a durable workspace task as done and optionally record the result.",
+        inputSchema: completeTaskSchema,
+        risk: "low",
+        async execute(input) {
+          const data = input as z.infer<typeof completeTaskSchema>;
+          const records = await readTaskRecords(workspaceRoot);
+          const now = new Date().toISOString();
+          const found = records.find((record) => record.id === data.id);
+          if (!found) {
+            throw new Error(`Task was not found: ${data.id}`);
+          }
+          const nextRecord = {
+            ...found,
+            status: "done" as const,
+            result: data.result ?? found.result,
+            updatedAt: now
+          };
+          await writeTaskRecords(workspaceRoot, records.map((record) => record.id === data.id ? nextRecord : record));
+          return { task: nextRecord };
+        }
+      }
+    );
+  }
+
   return tools;
 }
 
@@ -344,6 +441,35 @@ function resolveWorkspacePath(workspaceRoot: string, inputPath: string): string 
     throw new Error(`Path escapes workspace: ${inputPath}`);
   }
   return path;
+}
+
+function taskId(title: string, createdAt: string): string {
+  const slug = title
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-|-$/g, "")
+    .slice(0, 40) || "task";
+  return `${slug}-${createdAt.replace(/[^0-9]/g, "").slice(0, 14)}`;
+}
+
+async function readTaskRecords(workspaceRoot: string): Promise<TaskRecord[]> {
+  const path = resolveWorkspacePath(workspaceRoot, ".recursive-harness/tasks.json");
+  try {
+    const content = await readFile(path, "utf8");
+    const parsed = JSON.parse(content) as { tasks?: TaskRecord[] };
+    return Array.isArray(parsed.tasks) ? parsed.tasks : [];
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      return [];
+    }
+    throw error;
+  }
+}
+
+async function writeTaskRecords(workspaceRoot: string, tasks: TaskRecord[]): Promise<void> {
+  const path = resolveWorkspacePath(workspaceRoot, ".recursive-harness/tasks.json");
+  await mkdir(dirname(path), { recursive: true });
+  await writeFile(path, `${JSON.stringify({ tasks }, null, 2)}\n`, "utf8");
 }
 
 async function searchDirectory(

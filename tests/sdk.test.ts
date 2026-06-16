@@ -252,7 +252,7 @@ describe("RecursiveHarness SDK", () => {
     }
   });
 
-  it("ships opt-in built-in list, read, write, edit, search, command, and feedback tools", async () => {
+  it("ships opt-in built-in list, read, write, edit, search, command, feedback, and task tools", async () => {
     const ollamaKey = process.env.OLLAMA_API_KEY;
     process.env.OLLAMA_API_KEY = "test-ollama-key";
     const workspace = join(tmpdir(), `recursive-harness-tools-${Date.now()}`);
@@ -267,6 +267,9 @@ describe("RecursiveHarness SDK", () => {
       .mockResolvedValueOnce(new Response(JSON.stringify({ message: { content: JSON.stringify({ action: "tool", toolName: "searchFiles", input: { query: "beta" } }) } }), { status: 200, headers: { "content-type": "application/json" } }))
       .mockResolvedValueOnce(new Response(JSON.stringify({ message: { content: JSON.stringify({ action: "tool", toolName: "runCommand", input: { command: "node -e \"console.log('ok')\"" } }) } }), { status: 200, headers: { "content-type": "application/json" } }))
       .mockResolvedValueOnce(new Response(JSON.stringify({ message: { content: JSON.stringify({ action: "tool", toolName: "noteDislikedResult", input: { reason: "Too vague", avoid: "generic apologies", preferred: "specific action" } }) } }), { status: 200, headers: { "content-type": "application/json" } }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ message: { content: JSON.stringify({ action: "tool", toolName: "upsertTask", input: { id: "task_1", title: "Finish local tool pass", status: "in_progress", detail: "Use built-in tools and verify state." } }) } }), { status: 200, headers: { "content-type": "application/json" } }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ message: { content: JSON.stringify({ action: "tool", toolName: "listTasks", input: { status: "in_progress" } }) } }), { status: 200, headers: { "content-type": "application/json" } }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ message: { content: JSON.stringify({ action: "tool", toolName: "completeTask", input: { id: "task_1", result: "Verified task state." } }) } }), { status: 200, headers: { "content-type": "application/json" } }))
       .mockResolvedValueOnce(new Response(JSON.stringify({ message: { content: JSON.stringify({ action: "answer" }) } }), { status: 200, headers: { "content-type": "application/json" } }))
       .mockResolvedValueOnce(new Response(JSON.stringify({ message: { content: "I used the local tools." } }), { status: 200, headers: { "content-type": "application/json" } }));
 
@@ -283,26 +286,30 @@ describe("RecursiveHarness SDK", () => {
         search: true,
         command: true,
         feedback: true,
+        tasks: true,
         allowedCommands: ["node"]
       },
-      agentLoop: { maxSteps: 10, maxToolCalls: 8 }
+      agentLoop: { maxSteps: 13, maxToolCalls: 11 }
     });
 
     const result = await harness.run({
       userId: "user_1",
       sessionId: "built_in_tools",
-      input: "Read the note, write a result, search beta, run node, and remember that I disliked vague answers."
+      input: "Read the note, write a result, search beta, run node, track the task, and remember that I disliked vague answers."
     });
 
-    expect(fetchMock).toHaveBeenCalledTimes(9);
-    expect(result.toolCalls.map((call) => call.name)).toEqual(["listFiles", "readFile", "writeFile", "editFile", "searchFiles", "runCommand", "noteDislikedResult"]);
+    expect(fetchMock).toHaveBeenCalledTimes(12);
+    expect(result.toolCalls.map((call) => call.name)).toEqual(["listFiles", "readFile", "writeFile", "editFile", "searchFiles", "runCommand", "noteDislikedResult", "upsertTask", "listTasks", "completeTask"]);
     expect(result.toolCalls.every((call) => call.ok)).toBe(true);
     expect(result.toolCalls[0]?.output).toMatchObject({ entries: expect.arrayContaining([expect.objectContaining({ name: "notes.txt", type: "file" })]) });
     expect(result.toolCalls[1]?.output).toMatchObject({ content: "beta" });
     expect(result.toolCalls[3]?.output).toMatchObject({ replacements: 1 });
     expect(result.toolCalls[5]?.output).toMatchObject({ exitCode: 0, stdout: expect.stringContaining("ok") });
+    expect(result.toolCalls[8]?.output).toMatchObject({ tasks: [expect.objectContaining({ id: "task_1", status: "in_progress" })] });
+    expect(result.toolCalls[9]?.output).toMatchObject({ task: expect.objectContaining({ id: "task_1", status: "done", result: "Verified task state." }) });
     expect(await readFile(join(workspace, "out/result.txt"), "utf8")).toBe("done edited");
     expect(await readFile(join(workspace, ".recursive-harness/disliked-results.jsonl"), "utf8")).toContain("Too vague");
+    expect(await readFile(join(workspace, ".recursive-harness/tasks.json"), "utf8")).toContain("\"status\": \"done\"");
 
     if (ollamaKey) {
       process.env.OLLAMA_API_KEY = ollamaKey;
