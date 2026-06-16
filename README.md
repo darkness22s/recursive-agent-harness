@@ -109,6 +109,7 @@ For local development or a trusted server runtime, the SDK/runtime can register 
 - `listFiles`: list files and directories inside a workspace directory.
 - `readFile`: read text files inside a workspace.
 - `writeFile`: write or append text files inside a workspace.
+- `editFile`: replace exact text in a workspace file with ambiguity checks.
 - `searchFiles`: search workspace filenames and text content.
 - `runCommand`: run shell commands from the workspace.
 - `noteDislikedResult`: record disliked outputs so the agent can avoid repeating them.
@@ -128,6 +129,7 @@ const harness = RecursiveHarness.create({
     list: true,
     read: true,
     write: true,
+    edit: true,
     search: true,
     command: true,
     feedback: true,
@@ -136,6 +138,8 @@ const harness = RecursiveHarness.create({
   }
 });
 ```
+
+`editFile` is safer than rewriting whole files for targeted changes: it fails if `oldText` is missing, and it rejects ambiguous multiple matches unless `replaceAll` is explicitly set.
 
 `runCommand` is powerful. Keep `allowedCommands` narrow in product builds. It returns stdout/stderr and an exit code even when the command fails, so the planner can recover from diagnostics. All file paths are resolved inside `workspaceRoot`, so built-in file tools reject path escapes.
 

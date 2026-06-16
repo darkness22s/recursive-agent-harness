@@ -34,6 +34,7 @@ export interface HarnessConfig {
     list?: boolean;
     read?: boolean;
     write?: boolean;
+    edit?: boolean;
     search?: boolean;
     command?: boolean;
     feedback?: boolean;

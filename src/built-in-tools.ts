@@ -25,6 +25,12 @@ const writeFileSchema = z.object({
   content: z.string(),
   append: z.boolean().optional()
 });
+const editFileSchema = z.object({
+  path: z.string(),
+  oldText: z.string(),
+  newText: z.string(),
+  replaceAll: z.boolean().optional()
+});
 const searchFilesSchema = z.object({
   query: z.string(),
   glob: z.string().optional(),
@@ -143,6 +149,43 @@ export function createBuiltInTools(config: HarnessConfig): ToolDefinition[] {
           path: relative(workspaceRoot, path),
           bytes: Buffer.byteLength(data.content, "utf8"),
           append: Boolean(data.append)
+        };
+      }
+    });
+  }
+
+  if (options.edit) {
+    tools.push({
+      name: "editFile",
+      description: "Edit a UTF-8 text file by replacing exact old text with new text inside the configured workspace.",
+      inputSchema: editFileSchema,
+      risk: "medium",
+      async execute(input) {
+        const data = input as z.infer<typeof editFileSchema>;
+        if (!data.oldText) {
+          throw new Error("oldText must not be empty.");
+        }
+        const path = resolveWorkspacePath(workspaceRoot, data.path);
+        const info = await stat(path);
+        if (info.size > maxReadBytes) {
+          throw new Error(`File is too large to edit through editFile: ${info.size} bytes.`);
+        }
+        const content = await readFile(path, "utf8");
+        const matches = countOccurrences(content, data.oldText);
+        if (matches === 0) {
+          throw new Error("oldText was not found in the file.");
+        }
+        if (matches > 1 && !data.replaceAll) {
+          throw new Error(`oldText matched ${matches} times. Set replaceAll=true or provide a more specific oldText.`);
+        }
+        const next = data.replaceAll
+          ? content.split(data.oldText).join(data.newText)
+          : content.replace(data.oldText, data.newText);
+        await writeFile(path, next, "utf8");
+        return {
+          path: relative(workspaceRoot, path),
+          replacements: data.replaceAll ? matches : 1,
+          bytes: Buffer.byteLength(next, "utf8")
         };
       }
     });
@@ -278,6 +321,19 @@ export async function readDislikedResultMemory(config: HarnessConfig, input: Run
       return [];
     }
     throw error;
+  }
+}
+
+function countOccurrences(content: string, needle: string): number {
+  let count = 0;
+  let index = 0;
+  while (true) {
+    const found = content.indexOf(needle, index);
+    if (found === -1) {
+      return count;
+    }
+    count += 1;
+    index = found + needle.length;
   }
 }
 

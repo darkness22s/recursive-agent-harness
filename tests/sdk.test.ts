@@ -252,7 +252,7 @@ describe("RecursiveHarness SDK", () => {
     }
   });
 
-  it("ships opt-in built-in list, read, write, search, command, and feedback tools", async () => {
+  it("ships opt-in built-in list, read, write, edit, search, command, and feedback tools", async () => {
     const ollamaKey = process.env.OLLAMA_API_KEY;
     process.env.OLLAMA_API_KEY = "test-ollama-key";
     const workspace = join(tmpdir(), `recursive-harness-tools-${Date.now()}`);
@@ -263,6 +263,7 @@ describe("RecursiveHarness SDK", () => {
       .mockResolvedValueOnce(new Response(JSON.stringify({ message: { content: JSON.stringify({ action: "tool", toolName: "listFiles", input: { path: "." } }) } }), { status: 200, headers: { "content-type": "application/json" } }))
       .mockResolvedValueOnce(new Response(JSON.stringify({ message: { content: JSON.stringify({ action: "tool", toolName: "readFile", input: { path: "notes.txt", startLine: 2, endLine: 2 } }) } }), { status: 200, headers: { "content-type": "application/json" } }))
       .mockResolvedValueOnce(new Response(JSON.stringify({ message: { content: JSON.stringify({ action: "tool", toolName: "writeFile", input: { path: "out/result.txt", content: "done" } }) } }), { status: 200, headers: { "content-type": "application/json" } }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ message: { content: JSON.stringify({ action: "tool", toolName: "editFile", input: { path: "out/result.txt", oldText: "done", newText: "done edited" } }) } }), { status: 200, headers: { "content-type": "application/json" } }))
       .mockResolvedValueOnce(new Response(JSON.stringify({ message: { content: JSON.stringify({ action: "tool", toolName: "searchFiles", input: { query: "beta" } }) } }), { status: 200, headers: { "content-type": "application/json" } }))
       .mockResolvedValueOnce(new Response(JSON.stringify({ message: { content: JSON.stringify({ action: "tool", toolName: "runCommand", input: { command: "node -e \"console.log('ok')\"" } }) } }), { status: 200, headers: { "content-type": "application/json" } }))
       .mockResolvedValueOnce(new Response(JSON.stringify({ message: { content: JSON.stringify({ action: "tool", toolName: "noteDislikedResult", input: { reason: "Too vague", avoid: "generic apologies", preferred: "specific action" } }) } }), { status: 200, headers: { "content-type": "application/json" } }))
@@ -278,12 +279,13 @@ describe("RecursiveHarness SDK", () => {
         list: true,
         read: true,
         write: true,
+        edit: true,
         search: true,
         command: true,
         feedback: true,
         allowedCommands: ["node"]
       },
-      agentLoop: { maxSteps: 9, maxToolCalls: 7 }
+      agentLoop: { maxSteps: 10, maxToolCalls: 8 }
     });
 
     const result = await harness.run({
@@ -292,14 +294,57 @@ describe("RecursiveHarness SDK", () => {
       input: "Read the note, write a result, search beta, run node, and remember that I disliked vague answers."
     });
 
-    expect(fetchMock).toHaveBeenCalledTimes(8);
-    expect(result.toolCalls.map((call) => call.name)).toEqual(["listFiles", "readFile", "writeFile", "searchFiles", "runCommand", "noteDislikedResult"]);
+    expect(fetchMock).toHaveBeenCalledTimes(9);
+    expect(result.toolCalls.map((call) => call.name)).toEqual(["listFiles", "readFile", "writeFile", "editFile", "searchFiles", "runCommand", "noteDislikedResult"]);
     expect(result.toolCalls.every((call) => call.ok)).toBe(true);
     expect(result.toolCalls[0]?.output).toMatchObject({ entries: expect.arrayContaining([expect.objectContaining({ name: "notes.txt", type: "file" })]) });
     expect(result.toolCalls[1]?.output).toMatchObject({ content: "beta" });
-    expect(result.toolCalls[4]?.output).toMatchObject({ exitCode: 0, stdout: expect.stringContaining("ok") });
-    expect(await readFile(join(workspace, "out/result.txt"), "utf8")).toBe("done");
+    expect(result.toolCalls[3]?.output).toMatchObject({ replacements: 1 });
+    expect(result.toolCalls[5]?.output).toMatchObject({ exitCode: 0, stdout: expect.stringContaining("ok") });
+    expect(await readFile(join(workspace, "out/result.txt"), "utf8")).toBe("done edited");
     expect(await readFile(join(workspace, ".recursive-harness/disliked-results.jsonl"), "utf8")).toContain("Too vague");
+
+    if (ollamaKey) {
+      process.env.OLLAMA_API_KEY = ollamaKey;
+    } else {
+      delete process.env.OLLAMA_API_KEY;
+    }
+    await rm(workspace, { recursive: true, force: true });
+  });
+
+  it("rejects ambiguous editFile replacements unless replaceAll is set", async () => {
+    const ollamaKey = process.env.OLLAMA_API_KEY;
+    process.env.OLLAMA_API_KEY = "test-ollama-key";
+    const workspace = join(tmpdir(), `recursive-harness-edit-ambiguous-${Date.now()}`);
+    await mkdir(workspace, { recursive: true });
+    await writeFile(join(workspace, "repeat.txt"), "same\nsame\n", "utf8");
+
+    vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(new Response(JSON.stringify({ message: { content: JSON.stringify({ action: "tool", toolName: "editFile", input: { path: "repeat.txt", oldText: "same", newText: "changed" } }) } }), { status: 200, headers: { "content-type": "application/json" } }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ message: { content: "The edit was ambiguous." } }), { status: 200, headers: { "content-type": "application/json" } }));
+
+    const harness = RecursiveHarness.create({
+      ...config,
+      appId: `edit-ambiguous-${Date.now()}`,
+      builtInTools: {
+        enabled: true,
+        workspaceRoot: workspace,
+        edit: true
+      }
+    });
+
+    const result = await harness.run({
+      userId: "user_1",
+      sessionId: "edit_ambiguous",
+      input: "Replace same with changed"
+    });
+
+    expect(result.toolCalls[0]).toMatchObject({
+      name: "editFile",
+      ok: false,
+      error: "oldText matched 2 times. Set replaceAll=true or provide a more specific oldText."
+    });
+    expect(await readFile(join(workspace, "repeat.txt"), "utf8")).toBe("same\nsame\n");
 
     if (ollamaKey) {
       process.env.OLLAMA_API_KEY = ollamaKey;
