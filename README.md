@@ -139,6 +139,8 @@ const harness = RecursiveHarness.create({
 
 Tool manifests sent to the planner include JSON schema input shapes, not just names. For example, the planner sees that `readFile` accepts `path`, `startLine`, and `endLine`, which makes built-in tool calling much less brittle.
 
+`noteDislikedResult` is not just a log. Recent disliked-result notes for the same `userId` and `sessionId` are loaded into later planner/answer memory, so the agent can avoid patterns the user already rejected instead of apologizing and repeating itself.
+
 ```ts
 import { RecursiveHarness } from "@darkness22s/recursive-harness-engine";
 import { z } from "zod";

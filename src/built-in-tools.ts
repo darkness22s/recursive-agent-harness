@@ -4,6 +4,7 @@ import { dirname, isAbsolute, relative, resolve } from "node:path";
 import { promisify } from "node:util";
 import { z } from "zod";
 import type { HarnessConfig, ToolDefinition } from "./types.js";
+import type { ConversationMessage, RunInput } from "./types.js";
 
 const execAsync = promisify(exec);
 
@@ -34,6 +35,15 @@ const noteDislikedResultSchema = z.object({
   avoid: z.string().optional(),
   preferred: z.string().optional()
 });
+
+interface DislikedResultRecord {
+  createdAt?: string;
+  userId?: string;
+  sessionId?: string;
+  reason?: string;
+  avoid?: string;
+  preferred?: string;
+}
 
 export function createBuiltInTools(config: HarnessConfig): ToolDefinition[] {
   const options = config.builtInTools;
@@ -170,6 +180,51 @@ export function createBuiltInTools(config: HarnessConfig): ToolDefinition[] {
   }
 
   return tools;
+}
+
+export async function readDislikedResultMemory(config: HarnessConfig, input: RunInput, limit = 5): Promise<ConversationMessage[]> {
+  const options = config.builtInTools;
+  if (!options?.enabled || !options.feedback) {
+    return [];
+  }
+
+  const workspaceRoot = resolve(options.workspaceRoot ?? process.cwd());
+  const path = resolveWorkspacePath(workspaceRoot, ".recursive-harness/disliked-results.jsonl");
+  try {
+    const content = await readFile(path, "utf8");
+    const records = content
+      .split(/\r?\n/)
+      .filter(Boolean)
+      .map((line) => JSON.parse(line) as DislikedResultRecord)
+      .filter((record) => record.userId === input.userId && record.sessionId === input.sessionId)
+      .slice(-limit);
+    if (records.length === 0) {
+      return [];
+    }
+    return [{
+      userId: input.userId,
+      sessionId: input.sessionId,
+      role: "system",
+      content: [
+        "User feedback from disliked prior results:",
+        ...records.map((record) => {
+          const parts = [
+            `reason=${record.reason ?? "unspecified"}`,
+            record.avoid ? `avoid=${record.avoid}` : undefined,
+            record.preferred ? `preferred=${record.preferred}` : undefined
+          ].filter(Boolean);
+          return `- ${parts.join("; ")}`;
+        }),
+        "Adjust future answers and tool choices to avoid repeating these disliked patterns."
+      ].join("\n"),
+      metadata: { source: "noteDislikedResult", count: records.length }
+    }];
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      return [];
+    }
+    throw error;
+  }
 }
 
 function resolveWorkspacePath(workspaceRoot: string, inputPath: string): string {

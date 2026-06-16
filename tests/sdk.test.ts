@@ -306,6 +306,56 @@ describe("RecursiveHarness SDK", () => {
     await rm(workspace, { recursive: true, force: true });
   });
 
+  it("loads disliked-result notes into later conversation memory", async () => {
+    const ollamaKey = process.env.OLLAMA_API_KEY;
+    process.env.OLLAMA_API_KEY = "test-ollama-key";
+    const workspace = join(tmpdir(), `recursive-harness-feedback-${Date.now()}`);
+    await mkdir(workspace, { recursive: true });
+
+    const fetchMock = vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(new Response(JSON.stringify({ message: { content: JSON.stringify({ action: "tool", toolName: "noteDislikedResult", input: { reason: "Too vague", avoid: "generic apologies", preferred: "specific next action" } }) } }), { status: 200, headers: { "content-type": "application/json" } }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ message: { content: JSON.stringify({ action: "answer" }) } }), { status: 200, headers: { "content-type": "application/json" } }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ message: { content: "Noted." } }), { status: 200, headers: { "content-type": "application/json" } }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ message: { content: JSON.stringify({ action: "answer" }) } }), { status: 200, headers: { "content-type": "application/json" } }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ message: { content: "Here is a specific next action." } }), { status: 200, headers: { "content-type": "application/json" } }));
+
+    const harness = RecursiveHarness.create({
+      ...config,
+      appId: `feedback-memory-${Date.now()}`,
+      builtInTools: {
+        enabled: true,
+        workspaceRoot: workspace,
+        feedback: true
+      }
+    });
+
+    await harness.run({
+      userId: "user_1",
+      sessionId: "feedback_session",
+      input: "I disliked that result because it was too vague."
+    });
+    await harness.run({
+      userId: "user_1",
+      sessionId: "feedback_session",
+      input: "Try again."
+    });
+
+    const secondPlannerBody = JSON.parse(String(fetchMock.mock.calls[3]?.[1]?.body)) as { messages: Array<{ role: string; content: string }> };
+    const plannerPayload = JSON.parse(secondPlannerBody.messages.find((message) => message.role === "user")?.content ?? "{}") as {
+      memory: Array<{ role: string; content: string }>;
+    };
+    expect(JSON.stringify(plannerPayload.memory)).toContain("User feedback from disliked prior results");
+    expect(JSON.stringify(plannerPayload.memory)).toContain("avoid=generic apologies");
+    expect(JSON.stringify(plannerPayload.memory)).toContain("preferred=specific next action");
+
+    if (ollamaKey) {
+      process.env.OLLAMA_API_KEY = ollamaKey;
+    } else {
+      delete process.env.OLLAMA_API_KEY;
+    }
+    await rm(workspace, { recursive: true, force: true });
+  });
+
   it("prepares built-in tools inside the runtime for hosted/server execution", async () => {
     const ollamaKey = process.env.OLLAMA_API_KEY;
     process.env.OLLAMA_API_KEY = "test-ollama-key";

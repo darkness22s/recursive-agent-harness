@@ -22,7 +22,7 @@ import { reflectionNarrative, summarizeExperience } from "./reflection.js";
 import { buildSuccessorImage } from "./successor.js";
 import { evaluateSuccessor } from "./evaluator.js";
 import { applyPromotion, rollbackIfDegraded } from "./promotion.js";
-import { createBuiltInTools } from "./built-in-tools.js";
+import { createBuiltInTools, readDislikedResultMemory } from "./built-in-tools.js";
 import { generateOllamaAnswer, isOllamaConfigured, planAgentAction, streamOllamaAnswer, type AgentLoopAction } from "./ollama.js";
 import { needsFreshSearch, searchTinyFish, type TinyFishSearchResult } from "./tinyfish.js";
 import { createMemoryFromConfig } from "./memory.js";
@@ -525,11 +525,18 @@ export class RecursiveRuntime {
     const limit = config.memory?.maxMessagesPerSession ?? 40;
     const fileMemory = createMemoryFromConfig(config);
     if (fileMemory) {
-      return fileMemory.read({ userId: input.userId, sessionId: input.sessionId, limit });
+      return [
+        ...(await fileMemory.read({ userId: input.userId, sessionId: input.sessionId, limit })),
+        ...(await readDislikedResultMemory(config, input))
+      ];
     }
-    return this.store.memories
+    const sessionMemory = this.store.memories
       .filter((message) => message.userId === input.userId && message.sessionId === input.sessionId)
       .slice(-limit);
+    return [
+      ...sessionMemory,
+      ...(await readDislikedResultMemory(config, input))
+    ];
   }
 
   private privateCapabilities(config: HarnessConfig): string[] {
