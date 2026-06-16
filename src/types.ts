@@ -28,6 +28,18 @@ export interface HarnessConfig {
     maxToolCalls?: number;
     forceSearchOnFreshness?: boolean;
   };
+  builtInTools?: {
+    enabled?: boolean;
+    workspaceRoot?: string;
+    read?: boolean;
+    write?: boolean;
+    search?: boolean;
+    command?: boolean;
+    feedback?: boolean;
+    allowedCommands?: string[];
+    maxReadBytes?: number;
+    commandTimeoutMs?: number;
+  };
   updates?: {
     webhookUrl?: string;
     apiKey?: string;

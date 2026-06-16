@@ -1,5 +1,6 @@
 export { RecursiveHarness } from "./sdk.js";
 export { RecursiveRuntime } from "./runtime.js";
+export { createBuiltInTools } from "./built-in-tools.js";
 export { createRuntimeServer } from "./server.js";
 export { detectAnger, detectProfanity } from "./detectors.js";
 export { generateOllamaAnswer, getOllamaModelConfig, isOllamaConfigured } from "./ollama.js";

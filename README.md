@@ -102,6 +102,41 @@ harness.registerTool({
 
 See `docs/agent-loop-research.md` for the architecture research and the SDK contract behind this loop.
 
+## Built-In Agent Workbench Tools
+
+For local development or a trusted server runtime, the SDK can register built-in tools similar to the primitives used by coding agents:
+
+- `readFile`: read text files inside a workspace.
+- `writeFile`: write or append text files inside a workspace.
+- `searchFiles`: search workspace filenames and text content.
+- `runCommand`: run shell commands from the workspace.
+- `noteDislikedResult`: record disliked outputs so the agent can avoid repeating them.
+
+They are off by default. Enable only the capabilities your app/runtime should expose:
+
+```ts
+const harness = RecursiveHarness.create({
+  appId: "my-app",
+  runtimeUrl: "local",
+  apiKey: "dev",
+  optimization: "retention",
+  autonomy: "full",
+  builtInTools: {
+    enabled: true,
+    workspaceRoot: process.cwd(),
+    read: true,
+    write: true,
+    search: true,
+    command: true,
+    feedback: true,
+    allowedCommands: ["npm", "node", "git"],
+    commandTimeoutMs: 10000
+  }
+});
+```
+
+`runCommand` is powerful. Keep `allowedCommands` narrow in product builds. All file paths are resolved inside `workspaceRoot`, so built-in file tools reject path escapes.
+
 ```ts
 import { RecursiveHarness } from "@darkness22s/recursive-harness-engine";
 import { z } from "zod";

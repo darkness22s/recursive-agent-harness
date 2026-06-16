@@ -1,4 +1,4 @@
-import { mkdir, rm } from "node:fs/promises";
+import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -250,6 +250,60 @@ describe("RecursiveHarness SDK", () => {
     } else {
       delete process.env.OLLAMA_API_KEY;
     }
+  });
+
+  it("ships opt-in built-in read, write, search, command, and feedback tools", async () => {
+    const ollamaKey = process.env.OLLAMA_API_KEY;
+    process.env.OLLAMA_API_KEY = "test-ollama-key";
+    const workspace = join(tmpdir(), `recursive-harness-tools-${Date.now()}`);
+    await mkdir(workspace, { recursive: true });
+    await writeFile(join(workspace, "notes.txt"), "alpha\nbeta\n", "utf8");
+
+    const fetchMock = vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(new Response(JSON.stringify({ message: { content: JSON.stringify({ action: "tool", toolName: "readFile", input: { path: "notes.txt", startLine: 2, endLine: 2 } }) } }), { status: 200, headers: { "content-type": "application/json" } }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ message: { content: JSON.stringify({ action: "tool", toolName: "writeFile", input: { path: "out/result.txt", content: "done" } }) } }), { status: 200, headers: { "content-type": "application/json" } }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ message: { content: JSON.stringify({ action: "tool", toolName: "searchFiles", input: { query: "beta" } }) } }), { status: 200, headers: { "content-type": "application/json" } }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ message: { content: JSON.stringify({ action: "tool", toolName: "runCommand", input: { command: "node -e \"console.log('ok')\"" } }) } }), { status: 200, headers: { "content-type": "application/json" } }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ message: { content: JSON.stringify({ action: "tool", toolName: "noteDislikedResult", input: { reason: "Too vague", avoid: "generic apologies", preferred: "specific action" } }) } }), { status: 200, headers: { "content-type": "application/json" } }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ message: { content: JSON.stringify({ action: "answer" }) } }), { status: 200, headers: { "content-type": "application/json" } }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ message: { content: "I used the local tools." } }), { status: 200, headers: { "content-type": "application/json" } }));
+
+    const harness = RecursiveHarness.create({
+      ...config,
+      appId: `built-in-tools-${Date.now()}`,
+      builtInTools: {
+        enabled: true,
+        workspaceRoot: workspace,
+        read: true,
+        write: true,
+        search: true,
+        command: true,
+        feedback: true,
+        allowedCommands: ["node"]
+      },
+      agentLoop: { maxSteps: 8, maxToolCalls: 6 }
+    });
+
+    const result = await harness.run({
+      userId: "user_1",
+      sessionId: "built_in_tools",
+      input: "Read the note, write a result, search beta, run node, and remember that I disliked vague answers."
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(7);
+    expect(result.toolCalls.map((call) => call.name)).toEqual(["readFile", "writeFile", "searchFiles", "runCommand", "noteDislikedResult"]);
+    expect(result.toolCalls.every((call) => call.ok)).toBe(true);
+    expect(result.toolCalls[0]?.output).toMatchObject({ content: "beta" });
+    expect(result.toolCalls[3]?.output).toMatchObject({ stdout: expect.stringContaining("ok") });
+    expect(await readFile(join(workspace, "out/result.txt"), "utf8")).toBe("done");
+    expect(await readFile(join(workspace, ".recursive-harness/disliked-results.jsonl"), "utf8")).toContain("Too vague");
+
+    if (ollamaKey) {
+      process.env.OLLAMA_API_KEY = ollamaKey;
+    } else {
+      delete process.env.OLLAMA_API_KEY;
+    }
+    await rm(workspace, { recursive: true, force: true });
   });
 
   it("detects profanity and anger in user experience traces", () => {

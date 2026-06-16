@@ -1,4 +1,5 @@
 import type { z } from "zod";
+import { createBuiltInTools } from "./built-in-tools.js";
 import { detectAnger, detectProfanity } from "./detectors.js";
 import { RuntimeHttpClient } from "./http-client.js";
 import { RecursiveRuntime } from "./runtime.js";
@@ -29,6 +30,9 @@ export class RecursiveHarness {
   private constructor(private readonly config: HarnessConfig) {
     if (config.runtimeUrl === "local") {
       this.localRuntime = getSharedLocalRuntime(config.appId);
+      for (const tool of createBuiltInTools(config)) {
+        this.registerTool(tool);
+      }
     } else {
       this.httpClient = new RuntimeHttpClient(config);
     }
