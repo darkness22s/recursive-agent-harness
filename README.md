@@ -275,6 +275,8 @@ const result = await harness.chat({
 Use `chatStream()` when your UI wants token-by-token output with a simple callback:
 
 ```ts
+const controller = new AbortController();
+
 const final = await harness.chatStream({
   userId: "user_1",
   sessionId: "session_1",
@@ -289,8 +291,12 @@ const final = await harness.chatStream({
   if (event.type === "approval_required") {
     showApprovalDialog(event.data);
   }
+}, {
+  signal: controller.signal
 });
 ```
+
+Call `controller.abort()` when the user presses stop.
 
 You can also use `runStream()` directly as an async generator:
 

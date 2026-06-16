@@ -11,6 +11,7 @@ import type {
   RunInput,
   RunResult,
   StreamEvent,
+  StreamOptions,
   TrainingExportOptions,
   PendingToolApproval,
   ToolApprovalDecision,
@@ -124,13 +125,14 @@ export class RecursiveRuntime {
     };
   }
 
-  async *runStream(config: HarnessConfig, input: RunInput): AsyncGenerator<StreamEvent> {
+  async *runStream(config: HarnessConfig, input: RunInput, options?: StreamOptions): AsyncGenerator<StreamEvent> {
     this.ensureBuiltInTools(config);
     const traceId = nanoid();
     const image = this.store.activeImage();
     yield { type: "start", traceId };
 
     try {
+      this.throwIfAborted(options?.signal);
       const memory = createMemoryFromConfig(config);
       const memoryContext = await this.readMemoryContext(config, input);
       const userMemory = {
@@ -144,7 +146,8 @@ export class RecursiveRuntime {
       this.store.addMemory(userMemory);
 
       const toolCalls: ToolCallResult[] = [];
-      for await (const event of this.streamAgentLoop(config, input, traceId, memoryContext)) {
+      for await (const event of this.streamAgentLoop(config, input, traceId, memoryContext, options)) {
+        this.throwIfAborted(options?.signal);
         if (event.type === "tool_call") {
           toolCalls.push(event.data as ToolCallResult);
         }
@@ -165,7 +168,8 @@ export class RecursiveRuntime {
           recoveryStrategy: image.behaviorPolicy.recoveryStrategy,
           capabilities: this.privateCapabilities(config),
           updateDeliveryConfigured: Boolean(config.updates?.webhookUrl)
-        })) {
+        }, undefined, options?.signal)) {
+          this.throwIfAborted(options?.signal);
           output += token;
           yield { type: "token", traceId, data: token };
         }
@@ -377,9 +381,10 @@ export class RecursiveRuntime {
     return toolCalls;
   }
 
-  private async *streamAgentLoop(config: HarnessConfig, input: RunInput, traceId: string, memoryContext: ConversationMessage[]): AsyncGenerator<StreamEvent> {
+  private async *streamAgentLoop(config: HarnessConfig, input: RunInput, traceId: string, memoryContext: ConversationMessage[], options?: StreamOptions): AsyncGenerator<StreamEvent> {
     const toolCalls: ToolCallResult[] = [];
     for (let step = 0; step < this.maxSteps(config); step += 1) {
+      this.throwIfAborted(options?.signal);
       const action = await this.planNextAction(config, input, memoryContext, toolCalls);
       yield { type: "agent_action", traceId, data: this.publicAction(action) };
       if (action.action === "answer") {
@@ -682,6 +687,12 @@ export class RecursiveRuntime {
   private ensureBuiltInTools(config: HarnessConfig): void {
     for (const tool of createBuiltInTools(config)) {
       this.registerTool(tool);
+    }
+  }
+
+  private throwIfAborted(signal?: AbortSignal): void {
+    if (signal?.aborted) {
+      throw new Error("Stream aborted.");
     }
   }
 }

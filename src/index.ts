@@ -28,6 +28,7 @@ export type {
   RunResult,
   RuntimeImage,
   StreamEvent,
+  StreamOptions,
   TrainingExportOptions,
   ToolContext,
   ToolApprovalDecision,

@@ -11,6 +11,7 @@ import type {
   RunInput,
   RunResult,
   StreamEvent,
+  StreamOptions,
   PendingToolApproval,
   ToolApprovalDecision,
   ToolCallResult,
@@ -65,21 +66,21 @@ export class RecursiveHarness {
     return this.run(input);
   }
 
-  runStream(input: RunInput): AsyncGenerator<StreamEvent> {
+  runStream(input: RunInput, options?: StreamOptions): AsyncGenerator<StreamEvent> {
     if (this.localRuntime) {
-      return this.localRuntime.runStream(this.config, input);
+      return this.localRuntime.runStream(this.config, input, options);
     }
     if (!this.httpClient) {
       throw new Error("No runtime client is configured.");
     }
-    return this.httpClient.runStream(input);
+    return this.httpClient.runStream(input, options);
   }
 
-  async chatStream(input: RunInput, onEvent: (event: StreamEvent) => void | Promise<void>): Promise<RunResult> {
+  async chatStream(input: RunInput, onEvent: (event: StreamEvent) => void | Promise<void>, options?: StreamOptions): Promise<RunResult> {
     let final: RunResult | undefined;
     let output = "";
     let traceId = "";
-    for await (const event of this.runStream(input)) {
+    for await (const event of this.runStream(input, options)) {
       traceId = event.traceId;
       if (event.type === "token") {
         output += String(event.data ?? "");

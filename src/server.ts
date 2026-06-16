@@ -38,7 +38,7 @@ export function createRuntimeServer(runtime = new RecursiveRuntime()): Hono {
     const stream = new ReadableStream({
       async start(controller) {
         const encoder = new TextEncoder();
-        for await (const event of runtime.runStream(body.config, body.input)) {
+        for await (const event of runtime.runStream(body.config, body.input, { signal: context.req.raw.signal })) {
           controller.enqueue(encoder.encode(`data: ${JSON.stringify(event)}\n\n`));
         }
         controller.close();

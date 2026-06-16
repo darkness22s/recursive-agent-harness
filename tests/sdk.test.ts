@@ -1166,6 +1166,34 @@ describe("RecursiveHarness SDK", () => {
     await rm(memoryDir, { recursive: true, force: true });
   });
 
+  it("cancels a local stream with an AbortSignal before model work starts", async () => {
+    const ollamaKey = process.env.OLLAMA_API_KEY;
+    process.env.OLLAMA_API_KEY = "test-ollama-key";
+    const fetchMock = vi.spyOn(globalThis, "fetch");
+    const controller = new AbortController();
+    controller.abort();
+    const harness = RecursiveHarness.create(config);
+
+    const events = [];
+    for await (const event of harness.runStream({
+      userId: "user_1",
+      sessionId: "cancel_stream",
+      input: "this should stop"
+    }, { signal: controller.signal })) {
+      events.push(event);
+    }
+
+    expect(events.map((event) => event.type)).toEqual(["start", "error"]);
+    expect(events.at(-1)?.data).toBe("Stream aborted.");
+    expect(fetchMock).not.toHaveBeenCalled();
+
+    if (ollamaKey) {
+      process.env.OLLAMA_API_KEY = ollamaKey;
+    } else {
+      delete process.env.OLLAMA_API_KEY;
+    }
+  });
+
   it("emits approval_required while streaming risky tool calls", async () => {
     const ollamaKey = process.env.OLLAMA_API_KEY;
     process.env.OLLAMA_API_KEY = "test-ollama-key";

@@ -145,13 +145,14 @@ export async function planAgentAction(input: PlanAgentActionInput, config = getO
   return normalizeAgentAction(parseJsonObject(payload.message?.content ?? "{}"));
 }
 
-export async function* streamOllamaAnswer(input: GenerateAnswerInput, config = getOllamaModelConfig()): AsyncGenerator<string> {
+export async function* streamOllamaAnswer(input: GenerateAnswerInput, config = getOllamaModelConfig(), signal?: AbortSignal): AsyncGenerator<string> {
   if (!isOllamaConfigured(config)) {
     throw new Error("Ollama is not configured. Set OLLAMA_API_KEY before calling chat(), run(), or runStream().");
   }
 
   const response = await fetch(`${config.host}/api/chat`, {
     method: "POST",
+    signal,
     headers: {
       "content-type": "application/json",
       authorization: `Bearer ${config.apiKey}`

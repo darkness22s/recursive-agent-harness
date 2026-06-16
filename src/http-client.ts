@@ -8,6 +8,7 @@ import type {
   RunResult,
   RuntimeImage,
   StreamEvent,
+  StreamOptions,
   PendingToolApproval,
   ToolApprovalDecision,
   ToolCallResult,
@@ -59,9 +60,10 @@ export class RuntimeHttpClient {
     });
   }
 
-  async *runStream(input: RunInput): AsyncGenerator<StreamEvent> {
+  async *runStream(input: RunInput, options?: StreamOptions): AsyncGenerator<StreamEvent> {
     const response = await fetch(`${this.config.runtimeUrl}/v1/run/stream`, {
       method: "POST",
+      signal: options?.signal,
       headers: {
         "content-type": "application/json",
         authorization: `Bearer ${this.config.apiKey}`

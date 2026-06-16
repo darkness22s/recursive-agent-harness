@@ -105,6 +105,10 @@ export interface StreamEvent {
   data?: unknown;
 }
 
+export interface StreamOptions {
+  signal?: AbortSignal;
+}
+
 export interface ToolCallResult {
   name: string;
   ok: boolean;
