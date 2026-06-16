@@ -1166,6 +1166,52 @@ describe("RecursiveHarness SDK", () => {
     await rm(memoryDir, { recursive: true, force: true });
   });
 
+  it("emits approval_required while streaming risky tool calls", async () => {
+    const ollamaKey = process.env.OLLAMA_API_KEY;
+    process.env.OLLAMA_API_KEY = "test-ollama-key";
+    vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(new Response(JSON.stringify({ message: { content: JSON.stringify({ action: "tool", toolName: "deleteAccount", input: { id: "user_1" } }) } }), { status: 200, headers: { "content-type": "application/json" } }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ message: { content: "Approval is required." } }), { status: 200, headers: { "content-type": "application/json" } }));
+
+    const harness = RecursiveHarness.create({
+      ...config,
+      appId: `approval-stream-${Date.now()}`
+    });
+
+    harness.registerTool({
+      name: "deleteAccount",
+      description: "Deletes an account",
+      risk: "high",
+      requiresApproval: true,
+      inputSchema: z.object({ id: z.string() }),
+      execute: () => ({ deleted: true })
+    });
+
+    const events = [];
+    for await (const event of harness.runStream({
+      userId: "user_1",
+      sessionId: "approval_stream",
+      input: "delete my account"
+    })) {
+      events.push(event);
+    }
+
+    const approvalEvent = events.find((event) => event.type === "approval_required");
+    expect(events.map((event) => event.type)).toContain("tool_call");
+    expect(approvalEvent?.data).toMatchObject({
+      name: "deleteAccount",
+      ok: false,
+      approvalId: expect.any(String),
+      error: "Tool requires host approval before execution."
+    });
+
+    if (ollamaKey) {
+      process.env.OLLAMA_API_KEY = ollamaKey;
+    } else {
+      delete process.env.OLLAMA_API_KEY;
+    }
+  });
+
   it("delivers configured app updates through a webhook", async () => {
     const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify({ ok: true }), { status: 200 }));
     const harness = RecursiveHarness.create({

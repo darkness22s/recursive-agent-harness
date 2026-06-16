@@ -400,6 +400,9 @@ export class RecursiveRuntime {
       const call = await this.executeAgentAction(config, input, traceId, action);
       toolCalls.push(call);
       yield { type: "tool_call", traceId, data: call };
+      if (call.approvalId) {
+        yield { type: "approval_required", traceId, data: call };
+      }
       if (!call.ok) {
         break;
       }

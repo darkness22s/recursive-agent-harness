@@ -286,6 +286,9 @@ const final = await harness.chatStream({
   if (event.type === "tool_call") {
     console.log("tool", event.data);
   }
+  if (event.type === "approval_required") {
+    showApprovalDialog(event.data);
+  }
 });
 ```
 
@@ -301,7 +304,7 @@ for await (const event of harness.runStream({
 }
 ```
 
-The stream emits public events only: `start`, `tool_call`, `token`, `done`, and `error`.
+The stream emits public events only: `start`, `agent_action`, `tool_call`, `approval_required`, `token`, `done`, and `error`.
 
 ## App Updates Without Redownloading
 
