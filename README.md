@@ -147,6 +147,36 @@ Tool manifests sent to the planner include JSON schema input shapes, not just na
 
 `noteDislikedResult` is not just a log. Recent disliked-result notes for the same `userId` and `sessionId` are loaded into later planner/answer memory, so the agent can avoid patterns the user already rejected instead of apologizing and repeating itself.
 
+## Hosted Custom Tool Execution
+
+When `runtimeUrl` points at a hosted runtime, `registerTool()` can send tool manifests to the runtime, but the runtime cannot receive JavaScript functions over HTTP. Configure a tool executor webhook so manifest-only tools can still run through your app backend:
+
+```ts
+const harness = RecursiveHarness.create({
+  appId: "my-app",
+  runtimeUrl: "https://my-runtime.example.com",
+  apiKey: "runtime-key",
+  optimization: "retention",
+  autonomy: "full",
+  toolExecutor: {
+    webhookUrl: "https://my-product.com/api/agent-tools",
+    apiKey: "tool-executor-secret"
+  }
+});
+```
+
+The runtime sends:
+
+```ts
+{
+  toolName: "createTicket",
+  input: { title: "Bug" },
+  context: { userId, sessionId, appId, traceId }
+}
+```
+
+Return `{ ok: true, output: ... }` or `{ ok: false, error: "..." }`.
+
 ```ts
 import { RecursiveHarness } from "@darkness22s/recursive-harness-engine";
 import { z } from "zod";

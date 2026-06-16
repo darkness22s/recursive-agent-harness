@@ -483,6 +483,98 @@ describe("RecursiveHarness SDK", () => {
     await rm(workspace, { recursive: true, force: true });
   });
 
+  it("executes manifest-only hosted tools through toolExecutor webhook", async () => {
+    const ollamaKey = process.env.OLLAMA_API_KEY;
+    process.env.OLLAMA_API_KEY = "test-ollama-key";
+    const fetchMock = vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(new Response(JSON.stringify({ message: { content: JSON.stringify({ action: "tool", toolName: "createTicket", input: { title: "Bug" } }) } }), { status: 200, headers: { "content-type": "application/json" } }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ ok: true, output: { id: "ticket_1", title: "Bug" } }), { status: 200, headers: { "content-type": "application/json" } }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ message: { content: JSON.stringify({ action: "answer" }) } }), { status: 200, headers: { "content-type": "application/json" } }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ message: { content: "Created ticket_1." } }), { status: 200, headers: { "content-type": "application/json" } }));
+
+    const runtime = new RecursiveRuntime();
+    runtime.registerToolManifest({
+      name: "createTicket",
+      description: "Create a support ticket",
+      schema: {
+        kind: "json-schema",
+        schema: {
+          type: "object",
+          properties: { title: { type: "string" } },
+          required: ["title"]
+        }
+      },
+      risk: "medium"
+    });
+
+    const result = await runtime.run({
+      ...config,
+      toolExecutor: {
+        webhookUrl: "https://example.com/tools",
+        apiKey: "tool-secret"
+      }
+    }, {
+      userId: "user_1",
+      sessionId: "remote_tool",
+      input: "Create a ticket"
+    });
+
+    expect(result.toolCalls[0]).toMatchObject({
+      name: "createTicket",
+      ok: true,
+      output: { id: "ticket_1", title: "Bug" }
+    });
+    expect(fetchMock.mock.calls[1]?.[0]).toBe("https://example.com/tools");
+    expect(fetchMock.mock.calls[1]?.[1]).toMatchObject({
+      method: "POST",
+      headers: expect.objectContaining({ authorization: "Bearer tool-secret" })
+    });
+    expect(JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body))).toMatchObject({
+      toolName: "createTicket",
+      input: { title: "Bug" },
+      context: { userId: "user_1", sessionId: "remote_tool", appId: "test-app" }
+    });
+
+    if (ollamaKey) {
+      process.env.OLLAMA_API_KEY = ollamaKey;
+    } else {
+      delete process.env.OLLAMA_API_KEY;
+    }
+  });
+
+  it("fails clearly for manifest-only tools without a tool executor", async () => {
+    const ollamaKey = process.env.OLLAMA_API_KEY;
+    process.env.OLLAMA_API_KEY = "test-ollama-key";
+    vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(new Response(JSON.stringify({ message: { content: JSON.stringify({ action: "tool", toolName: "createTicket", input: { title: "Bug" } }) } }), { status: 200, headers: { "content-type": "application/json" } }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ message: { content: "I cannot execute that tool yet." } }), { status: 200, headers: { "content-type": "application/json" } }));
+
+    const runtime = new RecursiveRuntime();
+    runtime.registerToolManifest({
+      name: "createTicket",
+      description: "Create a support ticket",
+      schema: { kind: "json-schema", schema: { type: "object" } }
+    });
+
+    const result = await runtime.run(config, {
+      userId: "user_1",
+      sessionId: "remote_tool_missing",
+      input: "Create a ticket"
+    });
+
+    expect(result.toolCalls[0]).toMatchObject({
+      name: "createTicket",
+      ok: false,
+      error: "Tool is registered as a manifest only. Configure toolExecutor.webhookUrl to execute hosted custom tools."
+    });
+
+    if (ollamaKey) {
+      process.env.OLLAMA_API_KEY = ollamaKey;
+    } else {
+      delete process.env.OLLAMA_API_KEY;
+    }
+  });
+
   it("sends concrete built-in tool input schemas to the planner", async () => {
     const ollamaKey = process.env.OLLAMA_API_KEY;
     process.env.OLLAMA_API_KEY = "test-ollama-key";

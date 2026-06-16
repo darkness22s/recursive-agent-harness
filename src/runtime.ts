@@ -386,7 +386,7 @@ export class RecursiveRuntime {
     if (heuristicSearch) {
       return { action: "search", query: input.input, reason: "current-data request" };
     }
-    if (!config.search?.enabled && this.tools.size === 0) {
+    if (!config.search?.enabled && this.tools.size === 0 && this.store.tools.size === 0) {
       return { action: "answer" };
     }
     return planAgentAction({
@@ -413,7 +413,7 @@ export class RecursiveRuntime {
     const selected = this.tools.get(action.toolName);
     const candidateInput = action.input ?? {};
     if (!selected) {
-      return { name: action.toolName, ok: false, input: candidateInput, error: "Requested tool is not registered." };
+      return this.callRemoteManifestTool(config, input, traceId, action.toolName, candidateInput);
     }
     if (selected.requiresApproval || selected.risk === "high") {
       return {
@@ -438,6 +438,67 @@ export class RecursiveRuntime {
       return { name: selected.name, ok: true, input: parsed.data, output };
     } catch (error) {
       return { name: selected.name, ok: false, input: candidateInput, error: error instanceof Error ? error.message : String(error) };
+    }
+  }
+
+  private async callRemoteManifestTool(config: HarnessConfig, input: RunInput, traceId: string, toolName: string, candidateInput: unknown): Promise<ToolCallResult> {
+    const manifest = this.store.tools.get(toolName);
+    if (!manifest) {
+      return { name: toolName, ok: false, input: candidateInput, error: "Requested tool is not registered." };
+    }
+    if (manifest.requiresApproval || manifest.risk === "high") {
+      return {
+        name: toolName,
+        ok: false,
+        input: candidateInput,
+        error: "Tool requires host approval before execution."
+      };
+    }
+    if (!config.toolExecutor?.webhookUrl) {
+      return {
+        name: toolName,
+        ok: false,
+        input: candidateInput,
+        error: "Tool is registered as a manifest only. Configure toolExecutor.webhookUrl to execute hosted custom tools."
+      };
+    }
+
+    try {
+      const response = await fetch(config.toolExecutor.webhookUrl, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          ...(config.toolExecutor.apiKey ? { authorization: `Bearer ${config.toolExecutor.apiKey}` } : {})
+        },
+        body: JSON.stringify({
+          appId: config.appId,
+          toolName,
+          input: candidateInput,
+          context: {
+            userId: input.userId,
+            sessionId: input.sessionId,
+            appId: config.appId,
+            traceId
+          }
+        })
+      });
+      const payload = await response.json().catch(() => ({})) as { ok?: boolean; output?: unknown; error?: string };
+      if (!response.ok || payload.ok === false) {
+        return {
+          name: toolName,
+          ok: false,
+          input: candidateInput,
+          error: payload.error ?? `Tool executor failed: ${response.status}`
+        };
+      }
+      return {
+        name: toolName,
+        ok: true,
+        input: candidateInput,
+        output: Object.prototype.hasOwnProperty.call(payload, "output") ? payload.output : payload
+      };
+    } catch (error) {
+      return { name: toolName, ok: false, input: candidateInput, error: error instanceof Error ? error.message : String(error) };
     }
   }
 
@@ -546,6 +607,7 @@ export class RecursiveRuntime {
       config.search?.enabled ? "current-data search" : undefined,
       this.tools.size > 0 ? "host-registered tools" : undefined,
       config.builtInTools?.enabled ? "built-in workbench tools" : undefined,
+      config.toolExecutor?.webhookUrl ? "remote host tool execution" : undefined,
       config.updates?.webhookUrl ? "host app update delivery" : undefined,
       "experience tracking",
       "successor evaluation",

@@ -47,6 +47,10 @@ export interface HarnessConfig {
     apiKey?: string;
     channel?: string;
   };
+  toolExecutor?: {
+    webhookUrl?: string;
+    apiKey?: string;
+  };
   agents?: {
     workerId?: string;
     researchCadenceMinutes?: number;
